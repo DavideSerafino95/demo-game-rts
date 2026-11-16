@@ -356,7 +356,9 @@ function followPath(e, u, p, d, speed = d.speed) {
   let step = speed * DT;
   while (step > 0 && u.path.length) {
     const wp = u.path[0], dx = wp.x - p.x, dz = wp.z - p.z, dist = Math.hypot(dx, dz);
+    const tol = u.path.length > 1 ? .6 : .05;          // waypoint intermedi: basta passarci vicino
     if (dist <= step) { p.x = wp.x; p.z = wp.z; step -= dist; u.path.shift(); }
+    else if (dist <= tol) u.path.shift();
     else { p.x += dx / dist * step; p.z += dz / dist * step; p.face = Math.atan2(dx, dz); step = 0; }
   }
   return !u.path.length;
@@ -366,7 +368,16 @@ function unitSystem(w) {
   for (const e of [...w.query('Unit')]) {
     if (!alive(e)) continue;
     const u = w.get(e, 'Unit'), p = w.get(e, 'Pos'), d = UNITS[u.type], o = u.order;
+    const moved = Math.hypot(p.x - p.px, p.z - p.pz);
     p.px = p.x; p.pz = p.z;
+    // anti-blocco: se in marcia ma quasi fermo, salta il waypoint o considera arrivato
+    if (u.path && u.path.length && !u.pathPending) {
+      u.stuckT = moved < d.speed * DT * .3 ? (u.stuckT || 0) + 1 : 0;
+      if (u.stuckT > 20) {
+        u.stuckT = 0; const g = u.path[u.path.length - 1];
+        if (u.path.length === 1 && Math.hypot(g.x - p.x, g.z - p.z) < 3) u.path.length = 0; else u.path.shift();
+      }
+    }
     if (u.cd > 0) u.cd -= DT;
     // acquisizione automatica bersagli
     if ((o.type === 'idle' || o.type === 'amove') && (w.tick + e) % 5 === 0) {
