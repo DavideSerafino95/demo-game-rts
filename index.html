@@ -408,7 +408,7 @@ function unitSystem(w) {
           } else damage(e, ord.target, d.atk);
         }
       } else {
-        const stale = !u.path || (w.tick - u.pathTick > 10 && u.pathTarget && Math.hypot(u.pathTarget.x - q.x, u.pathTarget.z - q.z) > 1.5);
+        const stale = !u.path || (!u.path.length && w.tick - u.pathTick > 10) || (w.tick - u.pathTick > 10 && u.pathTarget && Math.hypot(u.pathTarget.x - q.x, u.pathTarget.z - q.z) > 1.5);
         if (stale && !u.pathPending) requestPath(e, q.x, q.z);
         followPath(e, u, p, d);
       }
