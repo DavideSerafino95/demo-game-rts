@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Demo RTS</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--ui:#1b1712e6;--line:#6b5a3e;--txt:#f1e6cf;--acc:#e0b154}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#111;font-family:system-ui,"Segoe UI",sans-serif;color:var(--txt);user-select:none}
+canvas#view{display:block}
+.panel{background:var(--ui);border:1px solid var(--line);border-radius:6px}
+#topbar{position:fixed;top:8px;left:50%;transform:translateX(-50%);display:flex;gap:18px;padding:6px 16px;font-size:14px;white-space:nowrap}
+#topbar b{color:var(--acc);font-weight:600}
+#miniwrap{position:fixed;right:12px;bottom:12px;width:270px;height:270px;display:flex;align-items:center;justify-content:center}
+#minimap{width:190px;height:190px;transform:rotate(45deg);image-rendering:pixelated;cursor:pointer;border:2px solid var(--line)}
+#debug{position:fixed;left:10px;bottom:10px;padding:8px 10px;font:12px/1.55 ui-monospace,Consolas,monospace;min-width:250px}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#menu{background:radial-gradient(#2a2216,#0c0a07)}
+#pause{background:#000b}
+.box{padding:28px 32px;min-width:360px;display:flex;flex-direction:column;gap:12px}
+h1{margin:0 0 6px;color:var(--acc);letter-spacing:1px}
+h2{margin:0;color:var(--acc);font-size:20px}
+button{font:inherit;padding:9px 14px;background:#3a2f20;color:var(--txt);border:1px solid var(--line);border-radius:4px;cursor:pointer}
+button:hover:not(:disabled){background:#4d3e29}
+button:disabled{opacity:.45;cursor:not-allowed}
+label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px}
+input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:5px 8px;width:160px}
+.hidden{display:none!important}
+#keys{font-size:14px;line-height:1.8;margin:0;padding-left:18px}
+.ok{color:#7ddc7d}.ko{color:#ef6b6b}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topbar" class="panel">
+    <span>🍖 <span data-i18n="food"></span> <b id="r-food">0</b></span>
+    <span>🪵 <span data-i18n="wood"></span> <b id="r-wood">0</b></span>
+    <span>🪨 <span data-i18n="stone"></span> <b id="r-stone">0</b></span>
+    <span>⚙️ <span data-i18n="metal"></span> <b id="r-metal">0</b></span>
+    <span>🪙 <span data-i18n="gold"></span> <b id="r-gold">0</b></span>
+    <span>👥 <span data-i18n="pop"></span> <b id="r-pop">0/100</b></span>
+    <span>⏱ <b id="r-time">00:00</b></span>
+  </div>
+  <div id="miniwrap"><canvas id="minimap" width="200" height="200"></canvas></div>
+  <div id="debug" class="panel"></div>
+</div>
+
+<div id="menu" class="overlay">
+  <div class="box panel">
+    <h1 data-i18n="title"></h1>
+    <label><span data-i18n="seed"></span><input id="seed"></label>
+    <label><span data-i18n="lang"></span>
+      <select id="lang"><option value="it">Italiano</option><option value="en">English</option></select></label>
+    <button id="btn-solo" data-i18n="solo"></button>
+    <button disabled><span data-i18n="host"></span> <span data-i18n="soon"></span></button>
+    <button disabled><span data-i18n="join"></span> <span data-i18n="soon"></span></button>
+  </div>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <div class="box panel">
+    <h2 data-i18n="controls"></h2>
+    <ul id="keys">
+      <li data-i18n="k_pan"></li><li data-i18n="k_zoom"></li><li data-i18n="k_ping"></li>
+      <li data-i18n="k_home"></li><li data-i18n="k_mini"></li><li data-i18n="k_esc"></li>
+    </ul>
+    <button id="btn-resume" data-i18n="start"></button>
+    <button id="btn-menu" data-i18n="toMenu"></button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "yuka":  "https://cdn.jsdelivr.net/npm/yuka@0.7.8/build/yuka.module.js"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import * as YUKA from 'yuka';
+
+/* ================= CONFIG ================= */
+const CFG = {
+  MAP: 200,                // celle per lato
+  TICK_MS: 50,             // simulazione a 20 Hz
+  BASE_OFF: 22,            // distanza base dall'angolo
+  ZOOM_MIN: 10, ZOOM_MAX: 70, ZOOM_START: 28,
+  EDGE_PX: 14,             // pan ai bordi
+};
+const PLAYER_COLORS = [0x3b82f6, 0x22c55e, 0xeab308, 0xdc2626, 0xf97316, 0xa855f7];
+const TEAM_OF = [0, 0, 0, 1, 1, 1];
+const T = { GRASS:0, WATER:1, FORD:2, TREE:3, STONE:4, METAL:5, GOLD:6 };
+const T_KEY = ['t_grass','t_water','t_ford','t_tree','t_stone','t_metal','t_gold'];
+const T_COLOR = [
+  [86,128,58], [44,98,150], [96,140,160], [44,88,40], [128,128,124], [92,96,112], [212,175,55]
+];
+const BASES = [
+  { x: CFG.BASE_OFF, z: CFG.BASE_OFF },
+  { x: CFG.MAP - 1 - CFG.BASE_OFF, z: CFG.MAP - 1 - CFG.BASE_OFF },
+];
+
+/* ================= I18N ================= */
+const STR = {
+  it: { title:'Demo RTS', solo:'Partita in solo', host:'Crea partita', join:'Unisciti', soon:'(in arrivo)',
+    seed:'Seed mappa', lang:'Lingua', food:'Cibo', wood:'Legno', stone:'Pietra', metal:'Metallo', gold:'Oro',
+    pop:'Pop', controls:'Comandi', start:'Inizia / Riprendi', toMenu:'Menu principale',
+    k_pan:'WASD / frecce / bordi schermo: sposta camera', k_zoom:'Rotella: zoom',
+    k_ping:'Click destro: ping (test comandi)', k_home:'H: centra sulla base',
+    k_mini:'Click minimappa: sposta camera', k_esc:'Esc: pausa e comandi',
+    cell:'Cella', terrain:'Terreno', libs:'Librerie', ents:'Entità',
+    t_grass:'Prato', t_water:'Fiume', t_ford:'Guado', t_tree:'Foresta', t_stone:'Pietra', t_metal:'Metallo', t_gold:'Oro' },
+  en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
+    seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
+    pop:'Pop', controls:'Controls', start:'Start / Resume', toMenu:'Main menu',
+    k_pan:'WASD / arrows / screen edges: move camera', k_zoom:'Wheel: zoom',
+    k_ping:'Right click: ping (command test)', k_home:'H: center on base',
+    k_mini:'Click minimap: move camera', k_esc:'Esc: pause and controls',
+    cell:'Cell', terrain:'Terrain', libs:'Libraries', ents:'Entities',
+    t_grass:'Grass', t_water:'River', t_ford:'Ford', t_tree:'Forest', t_stone:'Stone', t_metal:'Metal', t_gold:'Gold' },
+};
+let lang = localStorage.getItem('rts_lang') || 'it';
+const t = k => STR[lang][k] ?? k;
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+}
+
+/* ================= RNG + NOISE ================= */
+function hashSeed(s) { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let x = Math.imul(a ^ a >>> 15, 1 | a);
+  x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; }; }
+function makeNoise(rng) {
+  const N = 256, p = new Float32Array(N * N); for (let i = 0; i < p.length; i++) p[i] = rng();
+  const sm = v => v * v * (3 - 2 * v), g = (a, b) => p[(b & 255) * N + (a & 255)];
+  return (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), xf = sm(x - xi), yf = sm(y - yi);
+    const a = g(xi, yi), b = g(xi + 1, yi), c = g(xi, yi + 1), d = g(xi + 1, yi + 1);
+    return a + (b - a) * xf + (c - a) * yf + (a - b - c + d) * xf * yf; };
+}
+const fbm = (n, x, y) => (n(x, y) * .5 + n(x * 2, y * 2) * .25 + n(x * 4, y * 4) * .125 + n(x * 8, y * 8) * .0625) / .9375;
+
+/* ================= MAPPA (simmetria centrale) ================= */
+function generateMap(seed) {
+  const M = CFG.MAP, rng = mulberry32(hashSeed(seed)), noise = makeNoise(rng);
+  const tile = new Uint8Array(M * M), amount = new Uint16Array(M * M), shade = new Float32Array(M * M);
+  const idx = (x, z) => z * M + x;
+  const a1 = 3 + rng() * 3, a2 = 1 + rng() * 2;           // ondulazione fiume (funzioni dispari → simmetrica)
+  const FORDS = [0, -60, 60];
+  const distBase = (x, z) => Math.min(...BASES.map(b => Math.hypot(x - b.x, z - b.z)));
+  const riverD = (x, z) => { const d = (x + z - (M - 1)) / Math.SQRT2, s = (x - z) / Math.SQRT2;
+    return { r: Math.abs(d - (Math.sin(s * .055) * a1 + Math.sin(s * .13) * a2)), s }; };
+
+  for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
+    const i = idx(x, z), n = fbm(noise, x * .045, z * .045);
+    shade[i] = fbm(noise, x * .2 + 50, z * .2 + 50);
+    const { r, s } = riverD(x, z);
+    if (r < 3.2) { tile[i] = FORDS.some(f => Math.abs(s - f) < 4.5) ? T.FORD : T.WATER; continue; }
+    if (distBase(x, z) < 15 || r < 5) continue;
+    if (n > .6) { tile[i] = T.TREE; amount[i] = 100; }
+  }
+
+  // ammassi di risorse: solo nella metà z<M/2, poi specchiati
+  const cluster = (cx, cz, type, count, amt) => {
+    let x = Math.round(cx), z = Math.round(cz);
+    for (let k = 0, guard = 0; k < count && guard < count * 20; guard++) {
+      if (x > 1 && z > 1 && x < M - 2 && z < M / 2 - 2 && tile[idx(x, z)] === T.GRASS) {
+        tile[idx(x, z)] = type; amount[idx(x, z)] = amt; k++;
+      }
+      x += Math.round(rng() * 2 - 1); z += Math.round(rng() * 2 - 1);
+    }
+  };
+  const b = BASES[0];
+  const around = (r, ang) => [b.x + Math.cos(ang) * r, b.z + Math.sin(ang) * r];
+  // vicino alla base (verso il centro: angoli 0..90°)
+  const baseRing = [[T.STONE, 7, 350], [T.METAL, 7, 300], [T.GOLD, 6, 300]];
+  baseRing.forEach(([ty, c, a], k) => cluster(...around(20 + rng() * 4, (k * .5 + .1 + rng() * .3) * Math.PI / 2 * 1.3), ty, c, a));
+  // foreste vicino alla base
+  for (let k = 0; k < 3; k++) cluster(...around(19 + rng() * 6, rng() * Math.PI / 2), T.TREE, 40, 100);
+  // ammassi a metà mappa (più ricchi, contesi)
+  [[T.GOLD, 10, 500], [T.STONE, 9, 450], [T.METAL, 9, 450], [T.GOLD, 8, 400]].forEach(([ty, c, a]) => {
+    for (let tries = 0; tries < 50; tries++) {
+      const x = 15 + rng() * 170, z = 15 + rng() * 75;
+      if (distBase(x, z) > 45 && riverD(x, z).r > 10) { cluster(x, z, ty, c, a); break; }
+    }
+  });
+
+  // simmetria centrale: (x,z) → (M-1-x, M-1-z)
+  for (let i = 0, N = M * M; i < N / 2; i++) { const j = N - 1 - i; tile[j] = tile[i]; amount[j] = amount[i]; shade[j] = shade[i]; }
+  return { M, tile, amount, shade, seed, idx };
+}
+
+/* ================= ECS ================= */
+class World {
+  constructor() { this.next = 1; this.c = new Map(); this.tick = 0; this.systems = []; }
+  create() { return this.next++; }
+  add(e, name, data) { if (!this.c.has(name)) this.c.set(name, new Map()); this.c.get(name).set(e, data); return e; }
+  get(e, name) { return this.c.get(name)?.get(e); }
+  has(e, name) { return !!this.c.get(name)?.has(e); }
+  remove(e) { for (const m of this.c.values()) m.delete(e); }
+  *query(first, ...rest) { const m = this.c.get(first); if (!m) return;
+    for (const e of m.keys()) if (rest.every(n => this.c.get(n)?.has(e))) yield e; }
+  count() { const s = new Set(); for (const m of this.c.values()) for (const e of m.keys()) s.add(e); return s.size; }
+}
+
+/* ================= COMANDI ================= */
+// Ogni azione (locale, rete, IA) passa da qui → in M4 i client manderanno questi oggetti all'host.
+const Commands = {
+  queue: [],
+  issue(cmd) { this.queue.push(cmd); },
+  handlers: {
+    ping(w, c) {
+      const e = w.create();
+      w.add(e, 'Pos', { x: c.x, z: c.z });
+      w.add(e, 'Ping', { ttl: 40, max: 40 });
+      w.add(e, 'Owner', { player: c.player });
+    },
+  },
+  drain(w) { for (const c of this.queue) this.handlers[c.type]?.(w, c); this.queue.length = 0; },
+};
+
+/* ================= SISTEMI ================= */
+const pingSystem = w => { for (const e of [...w.query('Ping')]) { const p = w.get(e, 'Ping'); if (--p.ttl <= 0) w.remove(e); } };
+
+/* ================= RENDER ================= */
+const canvas = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1a14);
+scene.add(new THREE.HemisphereLight(0xfff4dd, 0x3a3020, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(60, 120, 30); scene.add(sun);
+
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 1000);
+const ISO = new THREE.Vector3(1, 1, 1).normalize();                 // pitch 35.26°, yaw 45°
+const SCREEN_RIGHT = new THREE.Vector3(1, 0, -1).normalize();
+const SCREEN_UP = new THREE.Vector3(-1, 0, -1).normalize();
+const camState = { target: new THREE.Vector3(), zoom: CFG.ZOOM_START };
+function updateCamera() {
+  const a = innerWidth / innerHeight, z = camState.zoom;
+  Object.assign(cam, { left: -z * a, right: z * a, top: z, bottom: -z });
+  cam.position.copy(camState.target).addScaledVector(ISO, 300);
+  cam.lookAt(camState.target); cam.updateProjectionMatrix();
+}
+function resize() { renderer.setSize(innerWidth, innerHeight); updateCamera(); }
+addEventListener('resize', resize);
+
+let mapGroup = null, map = null, world = null;
+const entityMeshes = new Map();
+
+function buildMapScene(m) {
+  if (mapGroup) { scene.remove(mapGroup); mapGroup.traverse(o => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose?.(); }); }
+  mapGroup = new THREE.Group(); scene.add(mapGroup);
+  const M = m.M;
+
+  // terreno: texture 1 pixel = 1 cella
+  const data = new Uint8Array(M * M * 4);
+  for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
+    const i = m.idx(x, z), ty = m.tile[i], base = (ty === T.TREE || ty >= T.STONE) ? T_COLOR[T.GRASS] : T_COLOR[ty];
+    const k = .85 + m.shade[i] * .3, o = ((M - 1 - z) * M + x) * 4;          // riga = M-1-z (orientamento plane)
+    data[o] = base[0] * k; data[o + 1] = base[1] * k; data[o + 2] = base[2] * k; data[o + 3] = 255;
+  }
+  const tex = new THREE.DataTexture(data, M, M); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(M, M), new THREE.MeshLambertMaterial({ map: tex }));
+  ground.rotation.x = -Math.PI / 2; ground.position.set(M / 2, 0, M / 2); mapGroup.add(ground);
+
+  // alberi e giacimenti con InstancedMesh (posizioni deterministiche)
+  const rng = mulberry32(hashSeed(m.seed + ':deco'));
+  const trees = [], rocks = [];
+  for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
+    const ty = m.tile[m.idx(x, z)];
+    if (ty === T.TREE) trees.push([x + .5 + (rng() - .5) * .5, z + .5 + (rng() - .5) * .5, .8 + rng() * .5]);
+    else if (ty >= T.STONE) rocks.push([x + .5, z + .5, ty, rng()]);
+  }
+  const dummy = new THREE.Object3D();
+  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.08, .12, .6, 5), new THREE.MeshLambertMaterial({ color: 0x5a3d22 }), trees.length);
+  const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 1.3, 6), new THREE.MeshLambertMaterial({ color: 0x2f6b2a, flatShading: true }), trees.length);
+  trees.forEach(([x, z, s], i) => {
+    dummy.position.set(x, .3 * s, z); dummy.scale.setScalar(s); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); trunk.setMatrixAt(i, dummy.matrix);
+    dummy.position.y = 1.1 * s; dummy.rotation.y = s * 9; dummy.updateMatrix(); crown.setMatrixAt(i, dummy.matrix);
+  });
+  mapGroup.add(trunk, crown);
+  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.42, 0), new THREE.MeshLambertMaterial({ flatShading: true }), rocks.length);
+  const col = new THREE.Color();
+  rocks.forEach(([x, z, ty, r], i) => {
+    dummy.position.set(x, .2, z); dummy.rotation.set(r * 3, r * 7, r * 5); dummy.scale.set(1, .7 + r * .4, 1); dummy.updateMatrix();
+    rockMesh.setMatrixAt(i, dummy.matrix); col.setRGB(...T_COLOR[ty].map(v => v / 255)).convertSRGBToLinear(); rockMesh.setColorAt(i, col);
+  });
+  mapGroup.add(rockMesh);
+
+  // Centri Città condivisi + stendardi dei 3 giocatori per squadra
+  BASES.forEach((b, team) => {
+    const g = new THREE.Group(); g.position.set(b.x + .5, 0, b.z + .5);
+    const teamCol = team === 0 ? 0x8aa4c8 : 0xc88a8a;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 4), new THREE.MeshLambertMaterial({ color: 0xcdbb98 }));
+    body.position.y = 1;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.3, 2, 4), new THREE.MeshLambertMaterial({ color: teamCol, flatShading: true }));
+    roof.position.y = 3; roof.rotation.y = Math.PI / 4;
+    g.add(body, roof);
+    [0, 1, 2].forEach(k => {
+      const p = team * 3 + k, ang = Math.PI / 4 + (k - 1) * .9 + (team ? Math.PI : 0);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 3), new THREE.MeshLambertMaterial({ color: 0x3b2a18 }));
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(.9, .55, .05), new THREE.MeshLambertMaterial({ color: PLAYER_COLORS[p] }));
+      pole.position.set(Math.cos(ang) * 3.2, 1.5, Math.sin(ang) * 3.2);
+      flag.position.set(pole.position.x + .45, 2.7, pole.position.z); flag.userData.wave = k;
+      g.add(pole, flag);
+    });
+    mapGroup.add(g);
+  });
+
+  buildMinimap(m);
+}
+
+function syncRender(time) {
+  // crea/aggiorna/rimuovi mesh per entità visibili (per ora solo ping)
+  const alive = new Set();
+  for (const e of world.query('Ping', 'Pos')) {
+    alive.add(e);
+    let mesh = entityMeshes.get(e);
+    if (!mesh) {
+      const o = world.get(e, 'Owner');
+      mesh = new THREE.Mesh(new THREE.RingGeometry(.6, .9, 24), new THREE.MeshBasicMaterial({ color: PLAYER_COLORS[o.player], transparent: true, side: THREE.DoubleSide }));
+      mesh.rotation.x = -Math.PI / 2; const p = world.get(e, 'Pos'); mesh.position.set(p.x, .05, p.z);
+      scene.add(mesh); entityMeshes.set(e, mesh);
+    }
+    const pg = world.get(e, 'Ping'), k = 1 - pg.ttl / pg.max;
+    mesh.scale.setScalar(1 + k * 2.5); mesh.material.opacity = 1 - k;
+  }
+  for (const [e, mesh] of entityMeshes) if (!alive.has(e)) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); entityMeshes.delete(e); }
+  // stendardi che ondeggiano
+  mapGroup.traverse(o => { if (o.userData.wave !== undefined) o.rotation.y = Math.sin(time * .003 + o.userData.wave) * .3; });
+}
+
+/* ================= MINIMAPPA ================= */
+const mini = document.getElementById('minimap'), mctx = mini.getContext('2d');
+let miniBase = null;
+function buildMinimap(m) {
+  miniBase = mctx.createImageData(m.M, m.M);
+  for (let i = 0; i < m.M * m.M; i++) { const c = T_COLOR[m.tile[i]], k = .85 + m.shade[i] * .3;
+    miniBase.data.set([c[0] * k, c[1] * k, c[2] * k, 255], i * 4); }
+}
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const raycaster = new THREE.Raycaster();
+function screenToGround(nx, ny, out = new THREE.Vector3()) {
+  raycaster.setFromCamera({ x: nx, y: ny }, cam); return raycaster.ray.intersectPlane(groundPlane, out);
+}
+function drawMinimap() {
+  mctx.putImageData(miniBase, 0, 0);
+  BASES.forEach((b, i) => { mctx.fillStyle = i ? '#ff5050' : '#5aa0ff'; mctx.fillRect(b.x - 3, b.z - 3, 6, 6); });
+  const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => screenToGround(x, y));
+  mctx.strokeStyle = '#fff'; mctx.lineWidth = 1; mctx.beginPath();
+  pts.forEach((p, i) => p && (i ? mctx.lineTo(p.x, p.z) : mctx.moveTo(p.x, p.z))); mctx.closePath(); mctx.stroke();
+}
+mini.addEventListener('mousedown', e => {
+  const s = CFG.MAP / mini.clientWidth;               // offsetX è nello spazio locale (prima della rotazione)
+  camState.target.set(e.offsetX * s, 0, e.offsetY * s); e.stopPropagation();
+});
+
+/* ================= INPUT ================= */
+const keys = new Set(); const mouse = { x: innerWidth / 2, y: innerHeight / 2, inside: false };
+addEventListener('keydown', e => {
+  if (state !== 'game') return;
+  keys.add(e.code);
+  if (e.code === 'Escape') setPaused(!paused);
+  if (e.code === 'KeyH') camState.target.set(BASES[0].x, 0, BASES[0].z);
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inside = true; });
+document.addEventListener('mouseleave', () => mouse.inside = false);
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  camState.zoom = THREE.MathUtils.clamp(camState.zoom * (e.deltaY > 0 ? 1.1 : 1 / 1.1), CFG.ZOOM_MIN, CFG.ZOOM_MAX);
+}, { passive: false });
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 2 || paused) return;
+  const p = screenToGround((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (p) Commands.issue({ type: 'ping', player: 0, x: p.x, z: p.z });
+});
+
+function panCamera(dt) {
+  let dx = 0, dy = 0;
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) dx--;
+  if (keys.has('KeyD') || keys.has('ArrowRight')) dx++;
+  if (keys.has('KeyW') || keys.has('ArrowUp')) dy++;
+  if (keys.has('KeyS') || keys.has('ArrowDown')) dy--;
+  if (mouse.inside && !paused) {
+    if (mouse.x < CFG.EDGE_PX) dx--; else if (mouse.x > innerWidth - CFG.EDGE_PX) dx++;
+    if (mouse.y < CFG.EDGE_PX) dy++; else if (mouse.y > innerHeight - CFG.EDGE_PX) dy--;
+  }
+  const sp = camState.zoom * 1.6 * dt;
+  camState.target.addScaledVector(SCREEN_RIGHT, dx * sp).addScaledVector(SCREEN_UP, dy * sp);
+  camState.target.x = THREE.MathUtils.clamp(camState.target.x, 0, CFG.MAP);
+  camState.target.z = THREE.MathUtils.clamp(camState.target.z, 0, CFG.MAP);
+}
+
+/* ================= STATO / UI ================= */
+let state = 'menu', paused = false;
+const $ = id => document.getElementById(id);
+function setPaused(v) { paused = v; $('pause').classList.toggle('hidden', !v); }
+$('seed').value = Math.random().toString(36).slice(2, 8).toUpperCase();
+$('lang').value = lang;
+$('lang').onchange = e => { lang = e.target.value; localStorage.setItem('rts_lang', lang); applyLang(); };
+$('btn-solo').onclick = () => startGame($('seed').value || 'demo');
+$('btn-resume').onclick = () => setPaused(false);
+$('btn-menu').onclick = () => { state = 'menu'; setPaused(false); $('hud').classList.add('hidden'); $('menu').classList.remove('hidden'); };
+
+function startGame(seed) {
+  map = generateMap(seed);
+  world = new World();
+  world.systems = [pingSystem];
+  for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear();
+  buildMapScene(map);
+  camState.target.set(BASES[0].x, 0, BASES[0].z); camState.zoom = CFG.ZOOM_START;
+  state = 'game'; acc = 0;
+  $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
+  setPaused(true);                                       // schermata comandi iniziale
+}
+
+function simStep() {
+  Commands.drain(world);
+  for (const s of world.systems) s(world);
+  world.tick++;
+}
+
+const LIBS = {
+  three: !!THREE.REVISION, yuka: typeof YUKA.AStar === 'function', peerjs: typeof window.Peer === 'function',
+};
+let hoverCell = null, fps = 0, fpsAcc = 0, fpsN = 0;
+function updateHud(dt) {
+  fpsAcc += dt; fpsN++; if (fpsAcc > .5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+  const s = Math.floor(world.tick * CFG.TICK_MS / 1000);
+  $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const p = screenToGround((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1);
+  hoverCell = p && p.x >= 0 && p.z >= 0 && p.x < CFG.MAP && p.z < CFG.MAP ? [Math.floor(p.x), Math.floor(p.z)] : null;
+  const ty = hoverCell ? map.tile[map.idx(...hoverCell)] : null;
+  const lib = Object.entries(LIBS).map(([k, v]) => `<span class="${v ? 'ok' : 'ko'}">${k}${v ? '✓' : '✗'}</span>`).join(' ');
+  $('debug').innerHTML =
+    `FPS ${fps} · tick ${world.tick} · ${t('ents')} ${world.count()}<br>` +
+    `seed ${map.seed} · zoom ${camState.zoom.toFixed(0)}<br>` +
+    `${t('cell')} ${hoverCell ? hoverCell.join(',') : '-'} · ${t('terrain')} ${ty !== null ? t(T_KEY[ty]) : '-'}` +
+    (hoverCell && map.amount[map.idx(...hoverCell)] ? ` (${map.amount[map.idx(...hoverCell)]})` : '') +
+    `<br>${t('libs')}: ${lib}`;
+}
+
+/* ================= LOOP ================= */
+let acc = 0, last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dtMs = Math.min(250, now - last); last = now;
+  if (state !== 'game') return;
+  if (!paused) { acc += dtMs; let n = 0; while (acc >= CFG.TICK_MS && n++ < 5) { simStep(); acc -= CFG.TICK_MS; } }
+  panCamera(dtMs / 1000);
+  updateCamera();
+  syncRender(now);
+  renderer.render(scene, cam);
+  drawMinimap();
+  updateHud(dtMs / 1000);
+}
+
+applyLang(); resize(); requestAnimationFrame(frame);
+window.__rts = { get world() { return world; }, get map() { return map; }, Commands, camState };   // debug da console
+</script>
+</body>
+</html>
