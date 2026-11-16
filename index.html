@@ -409,7 +409,7 @@ function unitSystem(w) {
   for (const e of w.query('Unit')) {
     const p = w.get(e, 'Pos'), u = w.get(e, 'Unit'), d = UNITS[u.type];
     for (const o of near(p.x, p.z, 1.2)) {
-      if (o <= e) continue;
+      if (o <= e || !alive(o)) continue;
       const q = w.get(o, 'Pos'), od = UNITS[w.get(o, 'Unit').type];
       let dx = q.x - p.x, dz = q.z - p.z, dist = Math.hypot(dx, dz); const min = d.r + od.r;
       if (dist >= min) continue;
