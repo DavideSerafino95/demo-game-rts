@@ -351,9 +351,9 @@ function damage(attacker, target, dmgBase) {
   if (tu.hp <= 0) killUnit(target);
 }
 function killUnit(e) { world.remove(e); selection.delete(e); }
-function followPath(e, u, p, d) {
+function followPath(e, u, p, d, speed = d.speed) {
   if (!u.path || !u.path.length) return true;
-  let step = d.speed * DT;
+  let step = speed * DT;
   while (step > 0 && u.path.length) {
     const wp = u.path[0], dx = wp.x - p.x, dz = wp.z - p.z, dist = Math.hypot(dx, dz);
     if (dist <= step) { p.x = wp.x; p.z = wp.z; step -= dist; u.path.shift(); }
@@ -372,7 +372,7 @@ function unitSystem(w) {
     if ((o.type === 'idle' || o.type === 'amove') && (w.tick + e) % 5 === 0) {
       const tg = findEnemy(e, d.sight);
       if (tg) {
-        if (o.type === 'amove') u.order = { type: 'attack', target: tg, resume: { x: o.x, z: o.z } };
+        if (o.type === 'amove') u.order = { type: 'attack', target: tg, resume: { x: o.x, z: o.z, vmax: o.vmax } };
         else u.order = { type: 'attack', target: tg, auto: true, home: { x: p.x, z: p.z } };
         u.path = null;
       }
@@ -380,7 +380,7 @@ function unitSystem(w) {
     const ord = u.order;
     if (ord.type === 'attack') {
       if (!alive(ord.target)) {
-        if (ord.resume) setOrder(e, { type: 'amove', x: ord.resume.x, z: ord.resume.z });
+        if (ord.resume) setOrder(e, { type: 'amove', x: ord.resume.x, z: ord.resume.z, vmax: ord.resume.vmax });
         else if (ord.auto && ord.home) setOrder(e, { type: 'move', x: ord.home.x, z: ord.home.z });
         else u.order = { type: 'idle' };
         continue;
@@ -402,7 +402,7 @@ function unitSystem(w) {
         followPath(e, u, p, d);
       }
     } else if (ord.type === 'move' || ord.type === 'amove') {
-      if (!u.pathPending && followPath(e, u, p, d) && u.path) { u.order = { type: 'idle' }; u.path = null; }
+      if (!u.pathPending && followPath(e, u, p, d, ord.vmax ?? d.speed) && u.path) { u.order = { type: 'idle' }; u.path = null; }
     }
   }
   // separazione (le unità ferme cedono di più)
@@ -451,7 +451,11 @@ const Commands = {
   issue(cmd) { this.queue.push(cmd); },
   handlers: {
     ping(w, c) { const e = w.create(); w.add(e, 'Pos', { x: c.x, z: c.z }); w.add(e, 'Ping', { ttl: 40, max: 40 }); w.add(e, 'Owner', { player: c.player }); },
-    move(w, c) { for (const [e, x, z] of formation(owned(c), c.x, c.z)) setOrder(e, { type: c.amove ? 'amove' : 'move', x, z }); },
+    move(w, c) {
+      const us = owned(c);   // il gruppo marcia alla velocità del più lento
+      const vmax = us.length > 1 ? Math.min(...us.map(e => UNITS[w.get(e, 'Unit').type].speed)) : undefined;
+      for (const [e, x, z] of formation(us, c.x, c.z)) setOrder(e, { type: c.amove ? 'amove' : 'move', x, z, vmax });
+    },
     attack(w, c) { if (!alive(c.target)) return; for (const e of owned(c)) setOrder(e, { type: 'attack', target: c.target }); },
     stop(w, c) { for (const e of owned(c)) setOrder(e, { type: 'idle' }); },
     kill(w, c) { for (const e of owned(c)) killUnit(e); },
