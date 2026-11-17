@@ -20,7 +20,7 @@ body.amove canvas#view{cursor:crosshair}
 #selinfo:empty{display:none}
 #selinfo h3{margin:0 0 2px;color:var(--acc);font-size:16px}
 #selbox{position:fixed;border:1px solid #fff;background:#ffffff1a;pointer-events:none}
-#hint{position:fixed;top:48px;left:50%;transform:translateX(-50%);padding:4px 12px;font-size:13px}
+#hint{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);padding:4px 12px;font-size:13px}
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
 #menu{background:radial-gradient(#2a2216,#0c0a07)}
 #pause{background:#000b}
@@ -36,6 +36,13 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 #keys{font-size:14px;line-height:1.75;margin:0;padding-left:18px;columns:2;column-gap:28px}
 #pause .box{max-width:760px}
 .ok{color:#7ddc7d}.ko{color:#ef6b6b}
+#cmd{position:fixed;left:12px;bottom:12px;padding:8px;display:grid;grid-template-columns:repeat(3,92px);gap:6px}
+#cmd:empty{display:none}
+#cmd button{padding:5px 4px;font-size:12px;line-height:1.25;display:flex;flex-direction:column;align-items:center}
+#cmd button small{opacity:.8;font-size:10.5px}
+#cmd .q{grid-column:1/-1;display:flex;gap:4px;flex-wrap:wrap;font-size:12px}
+#cmd .q button{flex-direction:row;gap:4px}
+.bar{height:5px;background:#300;margin-top:3px}.bar i{display:block;height:100%;background:#3ee05a}
 </style>
 </head>
 <body>
@@ -51,7 +58,8 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
     <span>👥 <span data-i18n="pop"></span> <b id="r-pop">0/100</b></span>
     <span>⏱ <b id="r-time">00:00</b></span>
   </div>
-  <div id="hint" class="panel hidden" data-i18n="h_amove"></div>
+  <div id="hint" class="panel hidden"></div>
+  <div id="cmd" class="panel"></div>
   <div id="selinfo" class="panel"></div>
   <div id="miniwrap"><canvas id="minimap" width="200" height="200"></canvas></div>
   <div id="debug" class="panel"></div>
@@ -78,6 +86,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
       <li data-i18n="k_right"></li><li data-i18n="k_amove"></li><li data-i18n="k_stop"></li><li data-i18n="k_groups"></li>
       <li data-i18n="k_del"></li><li data-i18n="k_pan"></li><li data-i18n="k_zoom"></li><li data-i18n="k_ping"></li>
       <li data-i18n="k_home"></li><li data-i18n="k_mini"></li><li data-i18n="k_esc"></li>
+      <li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li>
     </ul>
     <button id="btn-resume" data-i18n="start"></button>
     <button id="btn-menu" data-i18n="toMenu"></button>
@@ -100,8 +109,13 @@ const CFG = {
   MAP: 200, TICK_MS: 50, BASE_OFF: 22,
   ZOOM_MIN: 8, ZOOM_MAX: 70, ZOOM_START: 22, EDGE_PX: 14,
   PATHS_PER_TICK: 6,        // budget A* per tick
-  CC_HALF: 2,               // CC occupa 5x5 celle
+  CARRY: 10,                // carico massimo popolano
+  POP_BASE: 10, POP_MAX: 100,
+  FOREST_EVERY: 6, FOREST_GROW: 45, FOREST_R: 7, FOREST_MAX: 40,
+  START_RES: { food: 200, wood: 250, stone: 100, metal: 50, gold: 50 },
 };
+const RES = ['food', 'wood', 'stone', 'metal', 'gold'];
+const RES_ICON = { food: '🍖', wood: '🪵', stone: '🪨', metal: '⚙️', gold: '🪙' };
 const DT = CFG.TICK_MS / 1000;
 const PLAYER_COLORS = [0x3b82f6, 0x22c55e, 0xeab308, 0xdc2626, 0xf97316, 0xa855f7];
 const TEAM_OF = [0, 0, 0, 1, 1, 1];
@@ -109,6 +123,8 @@ const LOCAL_PLAYER = 0;
 const T = { GRASS:0, WATER:1, FORD:2, TREE:3, STONE:4, METAL:5, GOLD:6 };
 const T_KEY = ['t_grass','t_water','t_ford','t_tree','t_stone','t_metal','t_gold'];
 const T_COLOR = [[86,128,58],[44,98,150],[96,140,160],[44,88,40],[128,128,124],[92,96,112],[212,175,55]];
+const TILE_RES = { [T.TREE]: 'wood', [T.STONE]: 'stone', [T.METAL]: 'metal', [T.GOLD]: 'gold' };
+const GATHER_RATE = { food: .8, wood: .6, stone: .45, metal: .45, gold: .4 };   // unità/s
 const BASES = [
   { x: CFG.BASE_OFF, z: CFG.BASE_OFF },
   { x: CFG.MAP - 1 - CFG.BASE_OFF, z: CFG.MAP - 1 - CFG.BASE_OFF },
@@ -116,12 +132,27 @@ const BASES = [
 
 // Statistiche unità (distanze in celle, tempi in secondi)
 const UNITS = {
-  popolano: { hp: 25, atk: 3, kind: 'melee', armor: [0, 0], range: .5, speed: 2.6, cd: 1.5, sight: 6, r: .28, cls: 'civ' },
-  fante:    { hp: 60, atk: 8, kind: 'melee', armor: [1, 1], range: .6, speed: 2.4, cd: 1.2, sight: 6, r: .32, cls: 'inf' },
-  lanciere: { hp: 50, atk: 6, kind: 'melee', armor: [0, 1], range: .9, speed: 2.4, cd: 1.3, sight: 6, r: .32, cls: 'spear' },
-  arciere:  { hp: 35, atk: 5, kind: 'ranged', armor: [0, 0], range: 6, speed: 2.6, cd: 1.6, sight: 8, r: .3, cls: 'arch' },
-  cavaliere:{ hp: 90, atk: 9, kind: 'melee', armor: [1, 2], range: .7, speed: 4.2, cd: 1.4, sight: 7, r: .42, cls: 'cav' },
+  popolano: { hp: 25, atk: 3, kind: 'melee', armor: [0, 0], range: .5, speed: 2.6, cd: 1.5, sight: 6, r: .28, cls: 'civ', cost: { food: 50 }, time: 10 },
+  fante:    { hp: 60, atk: 8, kind: 'melee', armor: [1, 1], range: .6, speed: 2.4, cd: 1.2, sight: 6, r: .32, cls: 'inf', cost: { food: 60, metal: 20 }, time: 14 },
+  lanciere: { hp: 50, atk: 6, kind: 'melee', armor: [0, 1], range: .9, speed: 2.4, cd: 1.3, sight: 6, r: .32, cls: 'spear', cost: { food: 40, wood: 30 }, time: 12 },
+  arciere:  { hp: 35, atk: 5, kind: 'ranged', armor: [0, 0], range: 6, speed: 2.6, cd: 1.6, sight: 8, r: .3, cls: 'arch', cost: { food: 30, wood: 40 }, time: 14 },
+  cavaliere:{ hp: 90, atk: 9, kind: 'melee', armor: [1, 2], range: .7, speed: 4.2, cd: 1.4, sight: 7, r: .42, cls: 'cav', cost: { food: 80, metal: 40 }, time: 18 },
 };
+// Edifici: size in celle, time in s, drop = risorse accettate, train = unità producibili, key = tasto dopo B
+const BLD = {
+  cc:          { size: 5, hp: 2400, cost: {}, time: 1, drop: RES, train: ['popolano'], color: 0xcdbb98 },
+  casa:        { size: 2, hp: 300, cost: { wood: 30 }, time: 12, pop: 5, key: 'KeyC', color: 0xd8c39a },
+  fattoria:    { size: 3, hp: 150, cost: { wood: 60 }, time: 12, farm: true, walk: true, key: 'KeyF', color: 0x9a7b3c },
+  mulino:      { size: 3, hp: 500, cost: { wood: 100 }, time: 20, drop: ['food'], key: 'KeyM', color: 0xd9c9a3 },
+  segheria:    { size: 3, hp: 500, cost: { wood: 100 }, time: 20, drop: ['wood'], key: 'KeyL', color: 0x9c7a52 },
+  miniera:     { size: 3, hp: 500, cost: { wood: 100 }, time: 20, drop: ['stone', 'metal', 'gold'], key: 'KeyN', color: 0x8d8a84 },
+  guardaboschi:{ size: 2, hp: 300, cost: { wood: 120, gold: 20 }, time: 20, forest: true, key: 'KeyG', color: 0x6f8f4e },
+  caserma:     { size: 3, hp: 900, cost: { wood: 150 }, time: 30, train: ['fante', 'lanciere'], key: 'KeyK', color: 0xb59a7a },
+  arcieria:    { size: 3, hp: 900, cost: { wood: 150 }, time: 30, train: ['arciere'], key: 'KeyR', color: 0xa8916c },
+  scuderia:    { size: 3, hp: 900, cost: { wood: 150, stone: 50 }, time: 30, train: ['cavaliere'], key: 'KeyU', color: 0x9b8566 },
+};
+const BUILD_LIST = Object.keys(BLD).filter(k => BLD[k].key);
+const TRAIN_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
 // Contro-tipi: lancieri > cavalleria > arcieri > fanteria > lancieri
 const BONUS = { spear: { cav: 2.5 }, cav: { arch: 2 }, arch: { inf: 1.6 }, inf: { spear: 1.6 } };
 
@@ -139,7 +170,13 @@ const STR = {
     cell:'Cella', terrain:'Terreno', libs:'Librerie', ents:'Entità', units:'Unità',
     hp:'PV', atk:'Attacco', armor:'Armatura', range:'Gittata', enemy:'Nemico',
     u_popolano:'Popolano', u_fante:'Fante', u_lanciere:'Lanciere', u_arciere:'Arciere', u_cavaliere:'Cavaliere',
-    t_grass:'Prato', t_water:'Fiume', t_ford:'Guado', t_tree:'Foresta', t_stone:'Pietra', t_metal:'Metallo', t_gold:'Oro' },
+    t_grass:'Prato', t_water:'Fiume', t_ford:'Guado', t_tree:'Foresta', t_stone:'Pietra', t_metal:'Metallo', t_gold:'Oro',
+    b_cc:'Centro Città', b_casa:'Casa', b_fattoria:'Fattoria', b_mulino:'Mulino', b_segheria:'Segheria', b_miniera:'Accampamento minerario',
+    b_guardaboschi:'Guardaboschi', b_caserma:'Caserma', b_arcieria:'Arcieria', b_scuderia:'Scuderia',
+    k_build:'B + lettera: costruisci (popolani)', k_gather:'Click destro su risorsa/cantiere: raccogli/costruisci', k_idle:'. (punto): popolano inattivo',
+    k_train:'Q W E: addestra (edificio selezionato) · click destro: punto di raccolta',
+    h_place:'Click sinistro: piazza · Shift: piazza altri · Esc/click destro: annulla', h_build:'Costruisci: premi la lettera dell\'edificio (Esc annulla)',
+    building:'In costruzione', carry:'Trasporta', queue:'Coda', popmax:'Popolazione al massimo!', nores:'Risorse insufficienti', worker:'Contadino', drop:'Deposito' },
   en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
     seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
     pop:'Pop', controls:'Controls', start:'Start / Resume', toMenu:'Main menu',
@@ -152,7 +189,13 @@ const STR = {
     cell:'Cell', terrain:'Terrain', libs:'Libraries', ents:'Entities', units:'Units',
     hp:'HP', atk:'Attack', armor:'Armor', range:'Range', enemy:'Enemy',
     u_popolano:'Villager', u_fante:'Footman', u_lanciere:'Spearman', u_arciere:'Archer', u_cavaliere:'Knight',
-    t_grass:'Grass', t_water:'River', t_ford:'Ford', t_tree:'Forest', t_stone:'Stone', t_metal:'Metal', t_gold:'Gold' },
+    t_grass:'Grass', t_water:'River', t_ford:'Ford', t_tree:'Forest', t_stone:'Stone', t_metal:'Metal', t_gold:'Gold',
+    b_cc:'Town Center', b_casa:'House', b_fattoria:'Farm', b_mulino:'Mill', b_segheria:'Lumber Camp', b_miniera:'Mining Camp',
+    b_guardaboschi:'Forester', b_caserma:'Barracks', b_arcieria:'Archery Range', b_scuderia:'Stable',
+    k_build:'B + letter: build (villagers)', k_gather:'Right click resource/site: gather/build', k_idle:'. (period): idle villager',
+    k_train:'Q W E: train (building selected) · right click: rally point',
+    h_place:'Left click: place · Shift: place more · Esc/right click: cancel', h_build:'Build: press the building letter (Esc cancels)',
+    building:'Under construction', carry:'Carrying', queue:'Queue', popmax:'Population maxed!', nores:'Not enough resources', worker:'Farmer', drop:'Drop site' },
 };
 let lang = localStorage.getItem('rts_lang') || 'it';
 const t = k => STR[lang][k] ?? k;
@@ -215,28 +258,38 @@ function generateMap(seed) {
   });
   for (let i = 0, N = M * M; i < N / 2; i++) { const j = N - 1 - i; tile[j] = tile[i]; amount[j] = amount[i]; shade[j] = shade[i]; }
 
-  // celle percorribili (fiume e risorse bloccano, guado no; CC blocca)
+  // celle percorribili (fiume e risorse bloccano, guado no; edifici bloccano via setBlocked)
   const walk = new Uint8Array(M * M);
   for (let i = 0; i < M * M; i++) walk[i] = (tile[i] === T.GRASS || tile[i] === T.FORD) ? 1 : 0;
-  for (const bb of BASES) for (let dz = -CFG.CC_HALF; dz <= CFG.CC_HALF; dz++) for (let dx = -CFG.CC_HALF; dx <= CFG.CC_HALF; dx++) walk[idx(bb.x + dx, bb.z + dz)] = 0;
-  return { M, tile, amount, shade, walk, seed, idx };
+  // bld: id edificio per cella · saplings: cella → crescita 0..1 · dirty: celle cambiate da ridisegnare
+  return { M, tile, amount, shade, walk, seed, idx, bld: new Int32Array(M * M), saplings: new Map(), dirty: [] };
 }
 
 /* ================= PATHFINDING (Yuka) ================= */
+const NAV_DIRS = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
 class NavGrid {
   constructor(map) {
     this.map = map; const M = map.M, g = new YUKA.Graph(); g.digraph = true; this.graph = g;
-    const ok = (x, z) => x >= 0 && z >= 0 && x < M && z < M && map.walk[map.idx(x, z)];
-    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) if (ok(x, z)) g.addNode(new YUKA.NavNode(map.idx(x, z), new YUKA.Vector3(x + .5, 0, z + .5)));
-    const DIRS = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
-    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) {
-      if (!ok(x, z)) continue;
-      for (const [dx, dz, c] of DIRS) {
-        if (!ok(x + dx, z + dz)) continue;
-        if (dx && dz && (!ok(x + dx, z) || !ok(x, z + dz))) continue;     // niente tagli d'angolo
-        g.addEdge(new YUKA.NavEdge(map.idx(x, z), map.idx(x + dx, z + dz), c));
-      }
+    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) this.addNode(x, z);
+    for (let z = 0; z < M; z++) for (let x = 0; x < M; x++) this.link(x, z);
+  }
+  addNode(x, z) { const i = this.map.idx(x, z); if (this.walkable(x, z) && !this.graph.hasNode(i)) this.graph.addNode(new YUKA.NavNode(i, new YUKA.Vector3(x + .5, 0, z + .5))); }
+  link(x, z) {
+    const g = this.graph, i = this.map.idx(x, z), ok = (a, b) => this.walkable(a, b);
+    if (!g.hasNode(i)) return;
+    for (const ed of g.getEdgesOfNode(i, [])) g.removeEdge(ed);
+    if (!ok(x, z)) return;
+    for (const [dx, dz, c] of NAV_DIRS) {
+      if (!ok(x + dx, z + dz)) continue;
+      if (dx && dz && (!ok(x + dx, z) || !ok(x, z + dz))) continue;     // niente tagli d'angolo
+      g.addEdge(new YUKA.NavEdge(i, this.map.idx(x + dx, z + dz), c));
     }
+  }
+  // dopo un cambio di walk nel rettangolo: ricalcola archi delle celle e dei vicini
+  rebuildArea(x0, z0, x1, z1) {
+    const M = this.map.M, xa = Math.max(0, x0 - 1), za = Math.max(0, z0 - 1), xb = Math.min(M - 1, x1 + 1), zb = Math.min(M - 1, z1 + 1);
+    for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) this.addNode(x, z);
+    for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) this.link(x, z);
   }
   walkable(x, z) { const M = this.map.M; x = Math.floor(x); z = Math.floor(z); return x >= 0 && z >= 0 && x < M && z < M && !!this.map.walk[this.map.idx(x, z)]; }
   nearestWalkable(x, z, maxR = 12) {
@@ -315,7 +368,8 @@ function pathSystem(w) {
   for (let n = 0; n < CFG.PATHS_PER_TICK && pathQueue.length; n++) {
     const e = pathQueue.shift(); if (!alive(e)) continue;
     const u = w.get(e, 'Unit'), p = w.get(e, 'Pos');
-    u.path = nav.find(p.x, p.z, u.pathTarget.x, u.pathTarget.z) || []; u.pathPending = false;
+    const path = nav.find(p.x, p.z, u.pathTarget.x, u.pathTarget.z);
+    u.path = path || []; u.pathFailed = !path; u.pathPending = false;
   }
 }
 function setOrder(e, order) {
@@ -359,7 +413,15 @@ function followPath(e, u, p, d, speed = d.speed) {
     const tol = u.path.length > 1 ? .6 : .05;          // waypoint intermedi: basta passarci vicino
     if (dist <= step) { p.x = wp.x; p.z = wp.z; step -= dist; u.path.shift(); }
     else if (dist <= tol) u.path.shift();
-    else { p.x += dx / dist * step; p.z += dz / dist * step; p.face = Math.atan2(dx, dz); step = 0; }
+    else {
+      const nx = p.x + dx / dist * step, nz = p.z + dz / dist * step;
+      // un edificio nuovo taglia la strada: ricalcola il percorso
+      if (!nav.walkable(nx, nz) && nav.walkable(p.x, p.z)) {
+        if (!u.pathPending && world.tick - u.pathTick > 5 && u.pathTarget) requestPath(e, u.pathTarget.x, u.pathTarget.z);
+        return false;
+      }
+      p.x = nx; p.z = nz; p.face = Math.atan2(dx, dz); step = 0;
+    }
   }
   return !u.path.length;
 }
@@ -414,7 +476,9 @@ function unitSystem(w) {
       }
     } else if (ord.type === 'move' || ord.type === 'amove') {
       if (!u.pathPending && followPath(e, u, p, d, ord.vmax ?? d.speed) && u.path) { u.order = { type: 'idle' }; u.path = null; }
-    }
+    } else if (ord.type === 'gather') gatherStep(e, u, p, d, ord);
+    else if (ord.type === 'return') returnStep(e, u, p, d, ord);
+    else if (ord.type === 'build') buildStep(e, u, p, d, ord);
   }
   // separazione (le unità ferme cedono di più)
   for (const e of w.query('Unit')) {
@@ -440,11 +504,211 @@ function projectileSystem(w) {
     else { pr.x += dx / dist * step; pr.z += dz / dist * step; }
   }
 }
+
+/* ================= SIM: economia ed edifici ================= */
+const teamRes = t => world.res[t];
+const canPay = (team, cost) => RES.every(r => teamRes(team)[r] >= (cost[r] || 0));
+function pay(team, cost, sign = 1) { for (const r in cost) teamRes(team)[r] -= cost[r] * sign; }
+const bldRect = b => ({ x0: b.x0, z0: b.z0, x1: b.x0 + BLD[b.type].size, z1: b.z0 + BLD[b.type].size });
+function distRect(px, pz, r) { return Math.hypot(Math.max(r.x0 - px, 0, px - r.x1), Math.max(r.z0 - pz, 0, pz - r.z1)); }
+// punto appena fuori dal rettangolo, dal lato dell'unità
+function edgePoint(px, pz, r) {
+  const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+  let x = THREE.MathUtils.clamp(px, r.x0, r.x1), z = THREE.MathUtils.clamp(pz, r.z0, r.z1);
+  const dx = x - cx, dz = z - cz, l = Math.hypot(dx, dz) || 1; x += dx / l * .6; z += dz / l * .6;
+  const w = nav.nearestWalkable(x, z, 6); return w ? { x: w[0] + .5, z: w[1] + .5 } : { x, z };
+}
+const cellRect = c => { const x = c % map.M, z = Math.floor(c / map.M); return { x0: x, z0: z, x1: x + 1, z1: z + 1 }; };
+const hasWalkNeighbor = c => { const x = c % map.M, z = Math.floor(c / map.M); return NAV_DIRS.some(([dx, dz]) => nav.walkable(x + dx, z + dz)); };
+// cella risorsa raggiungibile più vicina a (x,z) entro r
+function findResCell(tile, x, z, r, skip) {
+  const M = map.M, cx = Math.floor(x), cz = Math.floor(z); let best = -1, bd = 1e9;
+  for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+    const gx = cx + dx, gz = cz + dz; if (gx < 0 || gz < 0 || gx >= M || gz >= M) continue;
+    const i = gz * M + gx; if (map.tile[i] !== tile || !map.amount[i] || skip?.has(i) || !hasWalkNeighbor(i)) continue;
+    const dd = Math.hypot(gx + .5 - x, gz + .5 - z); if (dd < bd) { bd = dd; best = i; }
+  }
+  return best;
+}
+// cella risorsa sotto/vicino al punto (tolleranza per click tra gli alberi)
+function resAt(x, z) {
+  const M = map.M; let best = -1, bd = 1.6;
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const cx = Math.floor(x) + dx, cz = Math.floor(z) + dz; if (cx < 0 || cz < 0 || cx >= M || cz >= M) continue;
+    const i = cz * M + cx, d = Math.hypot(cx + .5 - x, cz + .5 - z); if (TILE_RES[map.tile[i]] && map.amount[i] && d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function setWalk(x0, z0, x1, z1, v) {   // x1/z1 esclusi
+  for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) map.walk[map.idx(x, z)] = v;
+  nav.rebuildArea(x0, z0, x1 - 1, z1 - 1);
+}
+function depleteCell(c) {
+  map.tile[c] = T.GRASS; map.amount[c] = 0; map.dirty.push(c);
+  setWalk(c % map.M, Math.floor(c / map.M), c % map.M + 1, Math.floor(c / map.M) + 1, 1);
+}
+function placeOk(type, x0, z0) {
+  const s = BLD[type].size, M = map.M;
+  if (x0 < 1 || z0 < 1 || x0 + s > M - 1 || z0 + s > M - 1) return false;
+  for (let z = z0; z < z0 + s; z++) for (let x = x0; x < x0 + s; x++) {
+    const i = map.idx(x, z); if (map.tile[i] !== T.GRASS || !map.walk[i] || map.bld[i] || map.saplings.has(i)) return false;
+  }
+  if (!BLD[type].walk) for (const o of near(x0 + s / 2, z0 + s / 2, s)) {
+    const q = world.get(o, 'Pos'); if (alive(o) && q.x > x0 - .3 && q.x < x0 + s + .3 && q.z > z0 - .3 && q.z < z0 + s + .3) return false;
+  }
+  return true;
+}
+function createBuilding(type, player, x0, z0, done) {
+  const e = world.create(), d = BLD[type], s = d.size;
+  world.add(e, 'Pos', { x: x0 + s / 2, z: z0 + s / 2 });
+  world.add(e, 'Owner', { player });
+  world.add(e, 'Bld', { type, x0, z0, hp: d.hp, done, progress: done ? 1 : 0, queue: [], rally: null, worker: 0, forestT: 0 });
+  for (let z = z0; z < z0 + s; z++) for (let x = x0; x < x0 + s; x++) map.bld[map.idx(x, z)] = e;
+  if (!d.walk) setWalk(x0, z0, x0 + s, z0 + s, 0);
+  return e;
+}
+function nearestDrop(team, res, x, z) {
+  let best = null, bd = 1e9;
+  for (const e of world.query('Bld')) {
+    const b = world.get(e, 'Bld'); if (!b.done || !BLD[b.type].drop?.includes(res) || TEAM_OF[world.get(e, 'Owner').player] !== team) continue;
+    const dd = distRect(x, z, bldRect(b)); if (dd < bd) { bd = dd; best = e; }
+  }
+  return best;
+}
+// cammina verso (tx,tz), ricalcola il percorso se vecchio o se il bersaglio è cambiato
+function approach(e, u, p, d, tx, tz) {
+  const pt = u.pathTarget, w = world.tick;
+  const stale = !u.path || (!u.path.length && w - u.pathTick > 10) || (pt && Math.hypot(pt.x - tx, pt.z - tz) > 1);
+  if (stale && !u.pathPending) requestPath(e, tx, tz);
+  else followPath(e, u, p, d);
+}
+const toIdle = u => { u.order = { type: 'idle' }; u.path = null; };
+function gatherStep(e, u, p, d, o) {
+  if (u.pathFailed) {   // vicino irraggiungibile (sacca tra alberi): segnalo e provo altro
+    u.pathFailed = false; u.path = null;
+    if (o.farm || ++o.fails > 8) return toIdle(u);
+    (o.bad ||= new Set()).add(map.idx(Math.floor(u.pathTarget.x), Math.floor(u.pathTarget.z)));
+  }
+  o.fails ||= 0;
+  if (u.carry && u.carryRes !== o.res) u.carry = 0;     // cambio risorsa: si perde il carico (come AoE)
+  if (u.carry >= CFG.CARRY) { u.order = { type: 'return', back: o }; u.path = null; return; }
+  let rect;
+  if (o.farm) {
+    const f = world.get(o.farm, 'Bld');
+    if (!f || !f.done || (f.worker && f.worker !== e && alive(f.worker))) return toIdle(u);
+    f.worker = e; rect = bldRect(f);
+    if (distRect(p.x, p.z, rect) > .05) { const r = rect; approach(e, u, p, d, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); return; }
+  } else {
+    if (!map.amount[o.cell] || TILE_RES[map.tile[o.cell]] !== o.res) {
+      const c = findResCell(o.tile, o.cell % map.M + .5, Math.floor(o.cell / map.M) + .5, 8, o.bad);
+      if (c < 0) { if (u.carry) u.order = { type: 'return' }; else toIdle(u); u.path = null; return; }
+      o.cell = c; u.path = null; return;
+    }
+    rect = cellRect(o.cell);
+    if (distRect(p.x, p.z, rect) > .8) {
+      // vicino libero più comodo della cella risorsa
+      const cx = o.cell % map.M, cz = Math.floor(o.cell / map.M); let best = null, bd = 1e9;
+      for (const [dx, dz] of NAV_DIRS) if (nav.walkable(cx + dx, cz + dz) && !o.bad?.has(map.idx(cx + dx, cz + dz))) { const dd = Math.hypot(cx + dx + .5 - p.x, cz + dz + .5 - p.z); if (dd < bd) { bd = dd; best = [cx + dx + .5, cz + dz + .5]; } }
+      if (!best) { (o.bad ||= new Set()).add(o.cell); map.amount[o.cell] && (o.cell = findResCell(o.tile, cx + .5, cz + .5, 8, o.bad)); if (o.cell < 0) toIdle(u); return; }
+      approach(e, u, p, d, best[0], best[1]); return;
+    }
+  }
+  u.path = null; p.face = Math.atan2((rect.x0 + rect.x1) / 2 - p.x, (rect.z0 + rect.z1) / 2 - p.z);
+  if (world.tick % 10 === 0) u.attackAnim = world.tick;
+  u.gatherT = (u.gatherT || 0) + GATHER_RATE[o.res] * DT;
+  while (u.gatherT >= 1) {
+    u.gatherT--; u.carry = (u.carry || 0) + 1; u.carryRes = o.res;
+    if (!o.farm && --map.amount[o.cell] <= 0) { depleteCell(o.cell); break; }
+  }
+}
+function returnStep(e, u, p, d, o) {
+  if (u.pathFailed) { u.pathFailed = false; return toIdle(u); }
+  const team = teamOf(e), dep = u.carry ? nearestDrop(team, u.carryRes, p.x, p.z) : null;
+  if (!dep) { if (o.back && !u.carry) { u.order = o.back; u.path = null; } else toIdle(u); return; }
+  const r = bldRect(world.get(dep, 'Bld'));
+  if (distRect(p.x, p.z, r) <= .9) {
+    teamRes(team)[u.carryRes] += u.carry; u.carry = 0; u.gatherT = 0;
+    if (o.back) { u.order = o.back; u.path = null; } else toIdle(u);
+  } else { const ep = edgePoint(p.x, p.z, r); approach(e, u, p, d, ep.x, ep.z); }
+}
+// dopo aver finito un edificio: il popolano lavora lì vicino
+function afterBuild(e, u, b) {
+  const bd = BLD[b.type];
+  if (bd.farm && (!b.worker || !alive(b.worker))) { u.order = { type: 'gather', farm: u.order.target, res: 'food' }; u.path = null; return; }
+  const res = bd.drop?.find(r => r !== 'food'), tile = res && +Object.keys(TILE_RES).find(k => TILE_RES[k] === res);
+  const c = tile ? findResCell(tile, b.x0 + bd.size / 2, b.z0 + bd.size / 2, 10) : -1;
+  if (c >= 0) { u.order = { type: 'gather', cell: c, tile, res }; u.path = null; } else toIdle(u);
+}
+function buildStep(e, u, p, d, o) {
+  if (u.pathFailed) { u.pathFailed = false; return toIdle(u); }
+  const b = world.get(o.target, 'Bld'); if (!b) return toIdle(u);
+  if (b.done) return afterBuild(e, u, b);
+  const r = bldRect(b);
+  if (distRect(p.x, p.z, r) <= .9) {
+    u.path = null; p.face = Math.atan2(world.get(o.target, 'Pos').x - p.x, world.get(o.target, 'Pos').z - p.z);
+    if (world.tick % 8 === 0) u.attackAnim = world.tick;
+    b.progress = Math.min(1, b.progress + DT / BLD[b.type].time);
+    if (b.progress >= 1) b.done = true;
+  } else { const ep = edgePoint(p.x, p.z, r); approach(e, u, p, d, ep.x, ep.z); }
+}
+const popOf = pl => { let n = 0; for (const e of world.query('Unit')) if (world.get(e, 'Owner').player === pl) n++; return n; };
+function popCap(pl) {
+  let cap = CFG.POP_BASE;
+  for (const e of world.query('Bld')) { const b = world.get(e, 'Bld'); if (b.done && BLD[b.type].pop && world.get(e, 'Owner').player === pl) cap += BLD[b.type].pop; }
+  return Math.min(CFG.POP_MAX, cap);
+}
+function spawnFrom(be, type, player) {
+  const b = world.get(be, 'Bld'), r = bldRect(b), target = b.rally || { x: r.x1 + 1, z: r.z1 + 1 };
+  const ep = edgePoint(target.x, target.z, r), u = spawnUnit(type, player, ep.x, ep.z);
+  if (!b.rally) return;
+  const rc = resAt(b.rally.x, b.rally.z), c = rc >= 0 ? findResCell(map.tile[rc], b.rally.x, b.rally.z, 4) : -1, rb = bldAt(b.rally.x, b.rally.z);
+  if (type === 'popolano' && c >= 0) setOrder(u, { type: 'gather', cell: c, tile: map.tile[c], res: TILE_RES[map.tile[c]] });
+  else if (type === 'popolano' && rb && BLD[world.get(rb, 'Bld')?.type]?.farm) setOrder(u, { type: 'gather', farm: rb, res: 'food' });
+  else setOrder(u, { type: 'move', x: b.rally.x, z: b.rally.z });
+}
+function buildingSystem(w) {
+  const M = map.M;
+  for (const e of [...w.query('Bld')]) {
+    const b = w.get(e, 'Bld'), d = BLD[b.type];
+    if (!b.done) continue;
+    // produzione
+    const q = b.queue[0];
+    if (q) {
+      q.t = Math.min(UNITS[q.unit].time, q.t + DT);
+      q.blocked = q.t >= UNITS[q.unit].time && popOf(q.player) >= popCap(q.player);
+      if (q.t >= UNITS[q.unit].time && !q.blocked) { b.queue.shift(); spawnFrom(e, q.unit, q.player); }
+    }
+    // guardaboschi: pianta alberelli nel raggio
+    if (d.forest && (b.forestT += DT) >= CFG.FOREST_EVERY) {
+      b.forestT = 0;
+      const cx = b.x0 + d.size / 2, cz = b.z0 + d.size / 2, R = CFG.FOREST_R;
+      let trees = 0;
+      for (let z = Math.floor(cz - R); z <= cz + R; z++) for (let x = Math.floor(cx - R); x <= cx + R; x++)
+        if (x >= 0 && z >= 0 && x < M && z < M && (map.tile[map.idx(x, z)] === T.TREE || map.saplings.has(map.idx(x, z)))) trees++;
+      for (let k = 0; k < 10 && trees < CFG.FOREST_MAX; k++) {
+        const a = w.rng() * Math.PI * 2, rr = 2 + w.rng() * (R - 2), x = Math.floor(cx + Math.cos(a) * rr), z = Math.floor(cz + Math.sin(a) * rr);
+        if (x < 1 || z < 1 || x >= M - 1 || z >= M - 1) continue;
+        const i = map.idx(x, z); let ok = map.tile[i] === T.GRASS && map.walk[i] && !map.saplings.has(i);
+        for (let dz = -1; dz <= 1 && ok; dz++) for (let dx = -1; dx <= 1; dx++) if (map.bld[map.idx(x + dx, z + dz)]) ok = false;
+        if (ok) { map.saplings.set(i, 0); break; }
+      }
+    }
+  }
+  // alberelli crescono; diventano alberi solo se la cella è libera da unità
+  if (w.tick % 20 === 0) for (const [i, g] of map.saplings) {
+    const ng = Math.min(1, g + 1 / CFG.FOREST_GROW); map.saplings.set(i, ng);
+    if (ng < 1) continue;
+    const x = i % M, z = Math.floor(i / M);
+    if ([...near(x + .5, z + .5, 1.2)].some(o => { const q = w.get(o, 'Pos'); return alive(o) && Math.floor(q.x) === x && Math.floor(q.z) === z; })) continue;
+    map.saplings.delete(i); map.tile[i] = T.TREE; map.amount[i] = 100; map.dirty.push(i); setWalk(x, z, x + 1, z + 1, 0);
+  }
+}
 const pingSystem = w => { for (const e of [...w.query('Ping')]) { const p = w.get(e, 'Ping'); if (--p.ttl <= 0) w.remove(e); } };
 
 /* ================= COMANDI ================= */
 // Ogni azione (locale, rete, IA) passa da qui. In M4 i client invieranno questi oggetti all'host.
 const owned = (c) => (c.units || []).filter(e => alive(e) && world.get(e, 'Owner').player === c.player);
+const villagers = c => owned(c).filter(e => world.get(e, 'Unit').type === 'popolano');
 function formation(units, x, z) {
   const n = units.length, cols = Math.ceil(Math.sqrt(n)), sp = .95, out = [];
   const sorted = [...units].sort((a, b) => a - b);
@@ -470,6 +734,33 @@ const Commands = {
     attack(w, c) { if (!alive(c.target)) return; for (const e of owned(c)) setOrder(e, { type: 'attack', target: c.target }); },
     stop(w, c) { for (const e of owned(c)) setOrder(e, { type: 'idle' }); },
     kill(w, c) { for (const e of owned(c)) killUnit(e); },
+    // villagers: solo popolani del giocatore
+    build(w, c) {
+      const team = TEAM_OF[c.player], d = BLD[c.bld];
+      if (!d?.key || !placeOk(c.bld, c.x0, c.z0) || !canPay(team, d.cost)) return;
+      pay(team, d.cost);
+      const b = createBuilding(c.bld, c.player, c.x0, c.z0, false);
+      for (const e of villagers(c)) setOrder(e, { type: 'build', target: b });
+    },
+    construct(w, c) { const b = w.get(c.target, 'Bld'); if (b && TEAM_OF[w.get(c.target, 'Owner').player] === TEAM_OF[c.player]) for (const e of villagers(c)) setOrder(e, { type: 'build', target: c.target }); },
+    gather(w, c) {
+      if (c.farm) { const f = w.get(c.farm, 'Bld'); if (!f || !BLD[f.type].farm) return;
+        const v = villagers(c)[0]; if (v) setOrder(v, { type: 'gather', farm: c.farm, res: 'food' }); return; }
+      const tile = map.tile[c.cell], res = TILE_RES[tile]; if (!res) return;
+      for (const e of villagers(c)) setOrder(e, { type: 'gather', cell: c.cell, tile, res });
+    },
+    dropoff(w, c) { for (const e of villagers(c)) if (w.get(e, 'Unit').carry) setOrder(e, { type: 'return' }); },
+    train(w, c) {
+      const b = w.get(c.bld, 'Bld'), team = TEAM_OF[c.player];
+      if (!b?.done || TEAM_OF[w.get(c.bld, 'Owner').player] !== team || !BLD[b.type].train?.includes(c.unit) || b.queue.length >= 5) return;
+      if (!canPay(team, UNITS[c.unit].cost)) return;
+      pay(team, UNITS[c.unit].cost); b.queue.push({ unit: c.unit, player: c.player, t: 0 });
+    },
+    cancel(w, c) {
+      const b = w.get(c.bld, 'Bld'), q = b?.queue[c.i]; if (!q || q.player !== c.player) return;
+      b.queue.splice(c.i, 1); pay(TEAM_OF[c.player], UNITS[q.unit].cost, -1);
+    },
+    rally(w, c) { const b = w.get(c.bld, 'Bld'); if (b && TEAM_OF[w.get(c.bld, 'Owner').player] === TEAM_OF[c.player]) b.rally = { x: c.x, z: c.z }; },
   },
   drain(w) { for (const c of this.queue) this.handlers[c.type]?.(w, c); this.queue.length = 0; },
 };
@@ -521,41 +812,52 @@ function buildMapScene(m) {
     if (ty === T.TREE) trees.push([x + .5 + (rng() - .5) * .5, z + .5 + (rng() - .5) * .5, .8 + rng() * .5]);
     else if (ty >= T.STONE) rocks.push([x + .5, z + .5, ty, rng()]);
   }
-  const dummy = new THREE.Object3D();
-  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.08, .12, .6, 5), new THREE.MeshLambertMaterial({ color: 0x5a3d22 }), trees.length);
-  const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 1.3, 6), new THREE.MeshLambertMaterial({ color: 0x2f6b2a, flatShading: true }), trees.length);
-  trees.forEach(([x, z, s], i) => {
-    dummy.position.set(x, .3 * s, z); dummy.scale.setScalar(s); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); trunk.setMatrixAt(i, dummy.matrix);
-    dummy.position.y = 1.1 * s; dummy.rotation.y = s * 9; dummy.updateMatrix(); crown.setMatrixAt(i, dummy.matrix);
-  });
+  // alberi e rocce: slot per cella, così si possono togliere (esauriti) e aggiungere (guardaboschi)
+  const cap = trees.length + 800;
+  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.08, .12, .6, 5), new THREE.MeshLambertMaterial({ color: 0x5a3d22 }), cap);
+  const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 1.3, 6), new THREE.MeshLambertMaterial({ color: 0x2f6b2a, flatShading: true }), cap);
+  deco = { trunk, crown, treeSlot: new Int32Array(M * M).fill(-1), rockSlot: new Int32Array(M * M).fill(-1), free: [], used: 0, rng };
+  trunk.count = crown.count = cap;
+  for (let i = 0; i < cap; i++) setTree(i, 0, 0, 0);
+  trees.forEach(([x, z, s]) => { const i = deco.used++; deco.treeSlot[Math.floor(z) * M + Math.floor(x)] = i; setTree(i, x, z, s); });
+  for (let i = deco.used; i < cap; i++) deco.free.push(i);
   mapGroup.add(trunk, crown);
-  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.42, 0), new THREE.MeshLambertMaterial({ flatShading: true }), rocks.length);
+  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.42, 0), new THREE.MeshLambertMaterial({ flatShading: true }), Math.max(1, rocks.length));
   const col = new THREE.Color();
   rocks.forEach(([x, z, ty, r], i) => {
     dummy.position.set(x, .2, z); dummy.rotation.set(r * 3, r * 7, r * 5); dummy.scale.set(1, .7 + r * .4, 1); dummy.updateMatrix();
     rockMesh.setMatrixAt(i, dummy.matrix); col.setRGB(...T_COLOR[ty].map(v => v / 255)).convertSRGBToLinear(); rockMesh.setColorAt(i, col);
+    deco.rockSlot[Math.floor(z) * M + Math.floor(x)] = i;
   });
+  deco.rock = rockMesh;
   mapGroup.add(rockMesh);
-
-  BASES.forEach((b, team) => {
-    const g = new THREE.Group(); g.position.set(b.x + .5, 0, b.z + .5);
-    const teamCol = team === 0 ? 0x8aa4c8 : 0xc88a8a;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(4.6, 2, 4.6), new THREE.MeshLambertMaterial({ color: 0xcdbb98 }));
-    body.position.y = 1;
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(3.6, 2, 4), new THREE.MeshLambertMaterial({ color: teamCol, flatShading: true }));
-    roof.position.y = 3; roof.rotation.y = Math.PI / 4;
-    g.add(body, roof);
-    [0, 1, 2].forEach(k => {
-      const p = team * 3 + k, ang = Math.PI / 4 + (k - 1) * .9 + (team ? Math.PI : 0);
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 3), new THREE.MeshLambertMaterial({ color: 0x3b2a18 }));
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(.9, .55, .05), new THREE.MeshLambertMaterial({ color: PLAYER_COLORS[p] }));
-      pole.position.set(Math.cos(ang) * 3.4, 1.5, Math.sin(ang) * 3.4);
-      flag.position.set(pole.position.x + .45, 2.7, pole.position.z); flag.userData.wave = k;
-      g.add(pole, flag);
-    });
-    mapGroup.add(g);
-  });
   buildMinimap(m);
+}
+let deco = null;
+const dummy = new THREE.Object3D();
+function setTree(i, x, z, s) {
+  dummy.position.set(x, .3 * s, z); dummy.scale.setScalar(s); dummy.rotation.set(0, 0, 0); dummy.updateMatrix(); deco.trunk.setMatrixAt(i, dummy.matrix);
+  dummy.position.y = 1.1 * s; dummy.rotation.y = s * 9; dummy.updateMatrix(); deco.crown.setMatrixAt(i, dummy.matrix);
+  deco.trunk.instanceMatrix.needsUpdate = deco.crown.instanceMatrix.needsUpdate = true;
+}
+// applica i cambi di celle (alberi tagliati/cresciuti, rocce esaurite) a scena e minimappa
+function syncTerrain() {
+  const M = map.M;
+  for (const c of map.dirty) {
+    const x = c % M, z = Math.floor(c / M), ty = map.tile[c];
+    let slot = deco.treeSlot[c];
+    if (ty === T.TREE) { if (slot < 0 && deco.free.length) slot = deco.treeSlot[c] = deco.free.pop(); if (slot >= 0) setTree(slot, x + .5, z + .5, .8 + deco.rng() * .5); }
+    else if (slot >= 0 && !map.saplings.has(c)) { setTree(slot, 0, 0, 0); deco.free.push(slot); deco.treeSlot[c] = -1; }
+    const rs = deco.rockSlot[c];
+    if (rs >= 0 && ty === T.GRASS) { dummy.scale.setScalar(0); dummy.updateMatrix(); deco.rock.setMatrixAt(rs, dummy.matrix); deco.rock.instanceMatrix.needsUpdate = true; deco.rockSlot[c] = -1; }
+    const cc = T_COLOR[ty], k = .85 + map.shade[c] * .3; miniBase.data.set([cc[0] * k, cc[1] * k, cc[2] * k, 255], c * 4);
+  }
+  map.dirty.length = 0;
+  for (const [c, g] of map.saplings) {
+    let slot = deco.treeSlot[c];
+    if (slot < 0) { if (!deco.free.length) continue; slot = deco.treeSlot[c] = deco.free.pop(); }
+    setTree(slot, c % M + .5, Math.floor(c / M) + .5, .25 + g * .6);
+  }
 }
 
 // --- modelli unità (forme semplici, colore del giocatore) ---
@@ -564,7 +866,7 @@ const geo = {
   box: new THREE.BoxGeometry(.42, .5, .3), cone: new THREE.ConeGeometry(.26, .6, 8),
   stick: new THREE.CylinderGeometry(.025, .025, 1.3, 4), blade: new THREE.BoxGeometry(.05, .5, .1),
   bow: new THREE.TorusGeometry(.25, .025, 4, 10, Math.PI), horse: new THREE.BoxGeometry(.32, .35, .9),
-  ring: new THREE.RingGeometry(.5, .6, 24), bar: new THREE.PlaneGeometry(1, .1), proj: new THREE.BoxGeometry(.05, .05, .5),
+  ring: new THREE.RingGeometry(.5, .6, 24), bar: new THREE.PlaneGeometry(1, .1), proj: new THREE.BoxGeometry(.05, .05, .5), carry: new THREE.BoxGeometry(.22, .22, .16),
 };
 const matCache = new Map();
 const mat = (color) => { if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color, flatShading: true })); return matCache.get(color); };
@@ -587,15 +889,50 @@ function makeUnitMesh(type, player) {
     if (type === 'arciere') { const b = add(geo.bow, MAT.wood, .22, .45, .05); b.rotation.set(0, Math.PI / 2, Math.PI / 2); }
     if (type === 'popolano') body.scale.setScalar(.85);
   }
+  if (type === 'popolano') { const cb = new THREE.Mesh(geo.carry, MAT.skin); cb.position.set(0, .45, -.25); cb.visible = false; body.add(cb); g.userData.carry = cb; }
   const ring = new THREE.Mesh(geo.ring, TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.ring : MAT.ringEnemy);
   ring.rotation.x = -Math.PI / 2; ring.position.y = .03; ring.visible = false; ring.scale.setScalar(UNITS[type].r / .32);
   const bar = new THREE.Group(); bar.position.y = type === 'cavaliere' ? 1.55 : 1.05;
   const bg = new THREE.Mesh(geo.bar, MAT.barBg), fg = new THREE.Mesh(geo.bar, TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.barFg : MAT.barFgE);
   bg.scale.x = .8; fg.scale.x = .8; bg.renderOrder = 10; fg.renderOrder = 11; fg.position.z = .001; bar.add(bg, fg); bar.visible = false;
-  g.add(body, ring, bar); g.userData = { body, ring, bar, fg };
+  g.add(body, ring, bar); Object.assign(g.userData, { body, ring, bar, fg });
   return g;
 }
 
+const RES_COLOR = { food: 0xd9534f, wood: 0x8b5a2b, stone: 0x9a9a94, metal: 0x6e7690, gold: 0xe6c040 };
+const waveFlags = [];
+function makeBuildingMesh(type, player) {
+  const d = BLD[type], s = d.size, g = new THREE.Group(), body = new THREE.Group(), pc = mat(PLAYER_COLORS[player]);
+  const box = (w, h, dd, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), m); o.position.set(x, y, z); body.add(o); return o; };
+  if (d.farm) {
+    box(s - .2, .08, s - .2, mat(0x7a5a2c), 0, .04, 0);
+    for (let k = 0; k < 4; k++) box(s - .5, .14, .18, mat(0xc9b04a), 0, .1, -s / 2 + .55 + k * (s - 1.1) / 3);
+    box(.3, .5, .3, pc, s / 2 - .3, .25, s / 2 - .3);
+  } else {
+    const h = type === 'cc' ? 2 : s === 2 ? 1 : 1.4;
+    box(s - .4, h, s - .4, mat(d.color), 0, h / 2, 0);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry((s - .2) * .74, h * .9, 4), type === 'cc' ? mat(TEAM_OF[player] ? 0xc88a8a : 0x8aa4c8) : pc);
+    roof.position.y = h + h * .45; roof.rotation.y = Math.PI / 4; body.add(roof);
+    if (d.forest) for (let k = 0; k < 3; k++) { const c = new THREE.Mesh(geo.cone, mat(0x2f6b2a)); c.position.set(-s / 2 + .1 + k * .4, .3, s / 2 + .1); body.add(c); }
+    if (d.drop && type !== 'cc') d.drop.forEach((r, k) => box(.35, .35, .35, mat(RES_COLOR[r]), s / 2 - .1, .18, -s / 2 + .4 + k * .45));
+  }
+  if (type === 'cc') [0, 1, 2].forEach(k => {
+    const pl = TEAM_OF[player] * 3 + k, ang = Math.PI / 4 + (k - 1) * .9 + (TEAM_OF[player] ? Math.PI : 0);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.06, .06, 3), mat(0x3b2a18));
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(.9, .55, .05), mat(PLAYER_COLORS[pl]));
+    pole.position.set(Math.cos(ang) * 3.4, 1.5, Math.sin(ang) * 3.4);
+    flag.position.set(pole.position.x + .45, 2.7, pole.position.z); flag.userData.wave = k; waveFlags.push(flag);
+    g.add(pole, flag);
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(s * .72, s * .72 + .12, 4, 1), TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.ring : MAT.ringEnemy);
+  ring.rotation.set(-Math.PI / 2, 0, Math.PI / 4); ring.position.y = .05; ring.visible = false;
+  const bar = new THREE.Group(); bar.position.y = 3.2;
+  const bg = new THREE.Mesh(geo.bar, MAT.barBg), fg = new THREE.Mesh(geo.bar, MAT.barFg);
+  bg.scale.set(s * .6, 1.6, 1); fg.scale.set(s * .6, 1.6, 1); bg.renderOrder = 10; fg.renderOrder = 11; fg.position.z = .001; bar.add(bg, fg); bar.visible = false;
+  const scaf = new THREE.Mesh(new THREE.BoxGeometry(s - .2, .15, s - .2), mat(0x8a6a3a)); scaf.position.y = .07;
+  g.add(body, ring, bar, scaf); g.userData = { body, ring, bar, fg, scaf, s };
+  return g;
+}
 function syncRender(time, alpha) {
   const seen = new Set();
   const getMesh = (e, make) => { let m = entityMeshes.get(e); if (!m) { m = make(); scene.add(m); entityMeshes.set(e, m); } seen.add(e); return m; };
@@ -611,7 +948,26 @@ function syncRender(time, alpha) {
     const frac = Math.max(0, u.hp / UNITS[u.type].hp);
     ud.bar.visible = sel || frac < 1;
     if (ud.bar.visible) { ud.bar.quaternion.copy(cam.quaternion); ud.fg.scale.x = .8 * frac; ud.fg.position.x = -.4 * (1 - frac); }
+    if (ud.carry) { ud.carry.visible = !!u.carry; if (u.carry) ud.carry.material = mat(RES_COLOR[u.carryRes]); }
   }
+  for (const e of world.query('Bld')) {
+    const b = world.get(e, 'Bld'), p = world.get(e, 'Pos');
+    const m = getMesh(e, () => { const g = makeBuildingMesh(b.type, world.get(e, 'Owner').player); g.position.set(p.x, 0, p.z); return g; }), ud = m.userData;
+    ud.body.scale.y = b.done ? 1 : .1 + b.progress * .9; ud.scaf.visible = !b.done;
+    ud.ring.visible = selection.has(e);
+    const frac = b.done ? b.hp / BLD[b.type].hp : b.progress;
+    ud.bar.visible = ud.ring.visible || frac < 1;
+    if (ud.bar.visible) { const w = ud.s * .6; ud.bar.quaternion.copy(cam.quaternion); ud.fg.scale.x = w * frac; ud.fg.position.x = -w / 2 * (1 - frac); }
+  }
+  syncTerrain();
+  // anteprima piazzamento
+  ghost.visible = !!placing;
+  if (placing) {
+    const s = BLD[placing.type].size; ghost.scale.set(s, 1, s); ghost.position.set(placing.x0 + s / 2, .5, placing.z0 + s / 2);
+    ghost.material.color.set(placing.ok ? 0x40ff60 : 0xff4040);
+  }
+  rallyMarker.visible = false;
+  if (selection.size === 1) { const se = [...selection][0], b = world.get(se, 'Bld'); if (b?.rally && isTeam(se)) { rallyMarker.visible = true; rallyMarker.position.set(b.rally.x, 0, b.rally.z); } }
   for (const e of world.query('Proj')) {
     const pr = world.get(e, 'Proj');
     const m = getMesh(e, () => new THREE.Mesh(geo.proj, MAT.proj));
@@ -624,13 +980,19 @@ function syncRender(time, alpha) {
     const pg = world.get(e, 'Ping'), k = 1 - pg.ttl / pg.max; m.scale.setScalar(1 + k * 2.5); m.material.opacity = 1 - k;
   }
   for (const [e, m] of entityMeshes) if (!seen.has(e)) { scene.remove(m); if (m.userData.ping) m.material.dispose(); entityMeshes.delete(e); }
-  mapGroup.traverse(o => { if (o.userData.wave !== undefined) o.rotation.y = Math.sin(time * .003 + o.userData.wave) * .3; });
+  for (const f of waveFlags) f.rotation.y = Math.sin(time * .003 + f.userData.wave) * .3;
   // marcatore destinazione
   if (moveMarker.ttl > 0) { moveMarker.ttl--; moveMarker.mesh.visible = true; moveMarker.mesh.scale.setScalar(.4 + moveMarker.ttl / 30); }
   else moveMarker.mesh.visible = false;
 }
 const moveMarker = { ttl: 0, mesh: new THREE.Mesh(new THREE.RingGeometry(.3, .45, 20), new THREE.MeshBasicMaterial({ color: 0x9cff9c, side: THREE.DoubleSide })) };
 moveMarker.mesh.rotation.x = -Math.PI / 2; scene.add(moveMarker.mesh);
+const ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ transparent: true, opacity: .4, depthWrite: false }));
+ghost.visible = false; scene.add(ghost);
+const rallyMarker = new THREE.Group();
+{ const pole = new THREE.Mesh(new THREE.CylinderGeometry(.04, .04, 1.4), mat(0x3b2a18)); pole.position.y = .7;
+  const fl = new THREE.Mesh(new THREE.BoxGeometry(.5, .3, .03), mat(0xffffff)); fl.position.set(.25, 1.25, 0); rallyMarker.add(pole, fl); }
+rallyMarker.visible = false; scene.add(rallyMarker);
 function showMarker(x, z, enemy) { moveMarker.mesh.position.set(x, .05, z); moveMarker.mesh.material.color.set(enemy ? 0xff6060 : 0x9cff9c); moveMarker.ttl = 30; }
 
 /* ================= MINIMAPPA ================= */
@@ -648,7 +1010,7 @@ const pxToNdc = (x, y) => [(x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1]
 const hex = c => '#' + c.toString(16).padStart(6, '0');
 function drawMinimap() {
   mctx.putImageData(miniBase, 0, 0);
-  BASES.forEach((b, i) => { mctx.fillStyle = i ? '#ff5050' : '#5aa0ff'; mctx.fillRect(b.x - 3, b.z - 3, 6, 6); });
+  for (const e of world.query('Bld')) { const b = world.get(e, 'Bld'), sz = BLD[b.type].size; mctx.fillStyle = hex(PLAYER_COLORS[world.get(e, 'Owner').player]); mctx.fillRect(b.x0, b.z0, sz, sz); }
   for (const e of world.query('Unit', 'Pos')) { const p = world.get(e, 'Pos'); mctx.fillStyle = hex(PLAYER_COLORS[world.get(e, 'Owner').player]); mctx.fillRect(p.x - 1, p.z - 1, 2, 2); }
   const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => screenToGround(x, y));
   mctx.strokeStyle = '#fff'; mctx.lineWidth = 1; mctx.beginPath();
@@ -678,10 +1040,41 @@ function pickUnit(sx, sy) {
   return best;
 }
 const isMine = e => alive(e) && world.get(e, 'Owner').player === LOCAL_PLAYER;
+const isTeam = e => world.has(e, 'Owner') && TEAM_OF[world.get(e, 'Owner').player] === TEAM_OF[LOCAL_PLAYER];
 function mySelected() { return [...selection].filter(isMine); }
-function setAmove(v) { amoveMode = v; document.body.classList.toggle('amove', v); $('hint').classList.toggle('hidden', !v); }
+const myVillagers = () => mySelected().filter(e => world.get(e, 'Unit').type === 'popolano');
+const selBld = () => { if (selection.size !== 1) return 0; const e = [...selection][0]; return world.has(e, 'Bld') ? e : 0; };
+function showHint(k) { $('hint').textContent = k ? t(k) : ''; $('hint').classList.toggle('hidden', !k); }
+function setAmove(v) { amoveMode = v; document.body.classList.toggle('amove', v); showHint(v ? 'h_amove' : null); }
+let placing = null, buildKeys = false;
+function startPlacing(type) {
+  if (!myVillagers().length) return;
+  buildKeys = false; placing = { type, x0: 0, z0: 0, ok: false }; showHint('h_place'); updatePlacing();
+}
+function stopPlacing() { placing = null; buildKeys = false; showHint(null); }
+function updatePlacing() {
+  if (!placing) return;
+  const p = screenToGround(...pxToNdc(mouse.x, mouse.y)); if (!p) return;
+  const s = BLD[placing.type].size; placing.x0 = Math.round(p.x - s / 2); placing.z0 = Math.round(p.z - s / 2);
+  placing.ok = placeOk(placing.type, placing.x0, placing.z0) && canPay(TEAM_OF[LOCAL_PLAYER], BLD[placing.type].cost);
+}
+const bldAt = (x, z) => { const M = map.M, cx = Math.floor(x), cz = Math.floor(z); return cx >= 0 && cz >= 0 && cx < M && cz < M ? map.bld[cz * M + cx] : 0; };
+function train(unit) { const b = selBld(); if (b && isTeam(b)) Commands.issue({ type: 'train', player: LOCAL_PLAYER, bld: b, unit }); }
 function issueMoveOrAttack(x, z, target, amove = false) {
+  const sb = selBld();
+  if (sb && isTeam(sb) && BLD[world.get(sb, 'Bld').type].train) { Commands.issue({ type: 'rally', player: LOCAL_PLAYER, bld: sb, x, z }); showMarker(x, z); return; }
   const units = mySelected(); if (!units.length) return;
+  const vill = units.filter(e => world.get(e, 'Unit').type === 'popolano');
+  if (!amove && vill.length === units.length && !(target && alive(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER])) {
+    const be = bldAt(x, z), b = be && world.get(be, 'Bld');
+    if (b && isTeam(be)) {
+      if (!b.done) { Commands.issue({ type: 'construct', player: LOCAL_PLAYER, units, target: be }); showMarker(x, z); return; }
+      if (BLD[b.type].farm) { Commands.issue({ type: 'gather', player: LOCAL_PLAYER, units, farm: be }); showMarker(x, z); return; }
+      if (BLD[b.type].drop) { Commands.issue({ type: 'dropoff', player: LOCAL_PLAYER, units }); showMarker(x, z); return; }
+    }
+    const rc = resAt(x, z);
+    if (rc >= 0) { const c = findResCell(map.tile[rc], x, z, 4); if (c >= 0) { Commands.issue({ type: 'gather', player: LOCAL_PLAYER, units, cell: c }); showMarker(c % map.M + .5, Math.floor(c / map.M) + .5); return; } }
+  }
   if (target && alive(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER]) {
     Commands.issue({ type: 'attack', player: LOCAL_PLAYER, units, target });
     const p = world.get(target, 'Pos'); showMarker(p.x, p.z, true);
@@ -693,9 +1086,17 @@ let drag = null;
 addEventListener('keydown', e => {
   if (state !== 'game') return;
   keys.add(e.code);
-  if (e.code === 'Escape') { if (amoveMode) setAmove(false); else setPaused(!paused); return; }
+  if (e.code === 'Escape') { if (amoveMode) setAmove(false); else if (placing || buildKeys) stopPlacing(); else setPaused(!paused); return; }
   if (paused) return;
-  if (e.code === 'KeyH') camState.target.set(BASES[0].x, 0, BASES[0].z);
+  if (buildKeys) { const ty = BUILD_LIST.find(k => BLD[k].key === e.code); if (ty) startPlacing(ty); else stopPlacing(); return; }
+  if (e.code === 'KeyB' && myVillagers().length) { buildKeys = true; placing = null; showHint('h_build'); return; }
+  const sb = selBld(), ti = TRAIN_KEYS.indexOf(e.code);
+  if (sb && ti >= 0) { const list = BLD[world.get(sb, 'Bld').type].train; if (list?.[ti]) train(list[ti]); return; }
+  if (e.code === 'Period') {   // popolano inattivo successivo
+    const idle = [...world.query('Unit')].filter(u => isMine(u) && world.get(u, 'Unit').type === 'popolano' && world.get(u, 'Unit').order.type === 'idle');
+    if (idle.length) { const u = idle[(idle.indexOf([...selection][0]) + 1) % idle.length], p = world.get(u, 'Pos'); selection.clear(); selection.add(u); camState.target.set(p.x, 0, p.z); }
+  }
+  if (e.code === 'KeyH') camState.target.set(BASES[TEAM_OF[LOCAL_PLAYER]].x, 0, BASES[TEAM_OF[LOCAL_PLAYER]].z);
   if (e.code === 'KeyA' && mySelected().length) setAmove(true);
   if (e.code === 'KeyS' && mySelected().length) Commands.issue({ type: 'stop', player: LOCAL_PLAYER, units: mySelected() });
   if (e.code === 'Delete' && mySelected().length) Commands.issue({ type: 'kill', player: LOCAL_PLAYER, units: mySelected() });
@@ -715,7 +1116,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 addEventListener('mousemove', e => {
-  mouse.x = e.clientX; mouse.y = e.clientY; mouse.inside = true;
+  mouse.x = e.clientX; mouse.y = e.clientY; mouse.inside = true; updatePlacing();
   if (drag) {
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 5) drag.box = true;
     if (drag.box) { const b = $('selbox'); b.classList.remove('hidden');
@@ -731,13 +1132,20 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('mousedown', e => {
   if (paused || state !== 'game') return;
   const p = screenToGround(...pxToNdc(e.clientX, e.clientY));
+  if (placing) {
+    if (e.button === 0) { updatePlacing();
+      if (placing.ok) Commands.issue({ type: 'build', player: LOCAL_PLAYER, units: myVillagers(), bld: placing.type, x0: placing.x0, z0: placing.z0 });
+      if (!e.shiftKey) stopPlacing(); }
+    else stopPlacing();
+    return;
+  }
   if (e.button === 0) {
     if (amoveMode) { if (p) issueMoveOrAttack(p.x, p.z, pickUnit(e.clientX, e.clientY), true); setAmove(false); return; }
     drag = { x: e.clientX, y: e.clientY, box: false, shift: e.shiftKey };
   } else if (e.button === 2) {
     if (amoveMode) { setAmove(false); return; }
     if (!p) return;
-    if (e.altKey || !mySelected().length) { Commands.issue({ type: 'ping', player: LOCAL_PLAYER, x: p.x, z: p.z }); return; }
+    if (e.altKey || (!mySelected().length && !(selBld() && isTeam(selBld())))) { Commands.issue({ type: 'ping', player: LOCAL_PLAYER, x: p.x, z: p.z }); return; }
     issueMoveOrAttack(p.x, p.z, pickUnit(e.clientX, e.clientY));
   }
 });
@@ -750,8 +1158,8 @@ addEventListener('mouseup', e => {
     if (!d.shift) selection.clear(); inBox.forEach(u => selection.add(u));
   } else {
     const u = pickUnit(e.clientX, e.clientY);
-    if (d.shift && u && isMine(u)) { selection.has(u) ? selection.delete(u) : selection.add(u); }
-    else { selection.clear(); if (u) selection.add(u); }
+    if (d.shift && u && isMine(u)) { if (selBld()) selection.clear(); selection.has(u) ? selection.delete(u) : selection.add(u); }
+    else { selection.clear(); const p = screenToGround(...pxToNdc(e.clientX, e.clientY)), b = !u && p && bldAt(p.x, p.z); if (u || b) selection.add(u || b); }
   }
 });
 canvas.addEventListener('dblclick', e => {
@@ -787,16 +1195,14 @@ $('btn-solo').onclick = () => startGame($('seed').value || 'demo');
 $('btn-resume').onclick = () => setPaused(false);
 $('btn-menu').onclick = () => { state = 'menu'; setPaused(false); $('hud').classList.add('hidden'); $('menu').classList.remove('hidden'); };
 
-function spawnTestArmies() {
-  // truppe del giocatore vicino alla base
-  const b = BASES[0], ring = (n, r, a0) => Array.from({ length: n }, (_, i) => [b.x + .5 + Math.cos(a0 + i * .5) * r, b.z + .5 + Math.sin(a0 + i * .5) * r]);
+function spawnStart() {
   const place = (type, pl, x, z) => { const w = nav.nearestWalkable(x, z, 8); if (w) spawnUnit(type, pl, w[0] + .5, w[1] + .5); };
-  ring(3, 4.5, 0).forEach(([x, z]) => place('popolano', 0, x, z));
-  ring(5, 7, .1).forEach(([x, z]) => place('fante', 0, x, z));
-  ring(4, 8.5, .2).forEach(([x, z]) => place('arciere', 0, x, z));
-  ring(3, 10, .3).forEach(([x, z]) => place('lanciere', 0, x, z));
-  ring(2, 11.5, .4).forEach(([x, z]) => place('cavaliere', 0, x, z));
-  // squadra nemica di prova (giocatore 3) a ~35 celle dalla base, verso il centro
+  // CC condiviso per squadra (proprietario = primo slot della squadra)
+  BASES.forEach((bb, team) => createBuilding('cc', team * 3, bb.x - 2, bb.z - 2, true));
+  // popolani del giocatore locale (gli slot CPU arrivano con M5)
+  const b = BASES[0];
+  for (let i = 0; i < 4; i++) place('popolano', LOCAL_PLAYER, b.x + 4 + (i % 2), b.z + 4 + (i >> 1));
+  // squadra nemica di prova (giocatore 3) a ~42 celle dalla base, verso il centro
   const ex = b.x + 30, ez = b.z + 30;
   [['fante', 5], ['arciere', 3], ['lanciere', 2], ['cavaliere', 2]].forEach(([type, n], k) => {
     for (let i = 0; i < n; i++) place(type, 3, ex + (i - n / 2) * .9 + k * .5, ez + k * 1.1 - i * .3);
@@ -807,11 +1213,14 @@ function startGame(seed) {
   map = generateMap(seed);
   const t0 = performance.now(); nav = new NavGrid(map); navMs = Math.round(performance.now() - t0);
   world = new World();
-  world.systems = [pathSystem, unitSystem, projectileSystem, pingSystem];
+  world.systems = [pathSystem, unitSystem, buildingSystem, projectileSystem, pingSystem];
+  world.res = [0, 1].map(() => ({ ...CFG.START_RES }));
+  world.rng = mulberry32(hashSeed(seed + ':sim'));
   selection.clear(); pathQueue.length = 0; for (const k in groups) delete groups[k];
-  for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear();
+  for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear(); waveFlags.length = 0;
+  stopPlacing(); setAmove(false);
   buildMapScene(map);
-  spawnTestArmies();
+  spawnStart();
   camState.target.set(BASES[0].x + 6, 0, BASES[0].z + 6); camState.zoom = CFG.ZOOM_START;
   state = 'game'; acc = 0;
   $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
@@ -827,7 +1236,8 @@ function updateHud(dt) {
   fpsAcc += dt; fpsN++; if (fpsAcc > .5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
   const s = Math.floor(world.tick * CFG.TICK_MS / 1000);
   $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
-  $('r-pop').textContent = `${[...world.query('Unit')].filter(isMine).length}/100`;
+  const tr = teamRes(TEAM_OF[LOCAL_PLAYER]); for (const r of RES) $('r-' + r).textContent = Math.floor(tr[r]);
+  $('r-pop').textContent = `${popOf(LOCAL_PLAYER)}/${popCap(LOCAL_PLAYER)}`;
   const p = screenToGround(...pxToNdc(mouse.x, mouse.y));
   const hc = p && p.x >= 0 && p.z >= 0 && p.x < CFG.MAP && p.z < CFG.MAP ? [Math.floor(p.x), Math.floor(p.z)] : null;
   const ty = hc ? map.tile[map.idx(...hc)] : null;
@@ -840,15 +1250,44 @@ function updateHud(dt) {
   // pannello selezione
   const sel = [...selection].filter(alive);
   let html = '';
-  if (sel.length === 1) {
+  const sb = selBld();
+  if (sb) {
+    const b = world.get(sb, 'Bld'), d = BLD[b.type];
+    html = `<h3>${t('b_' + b.type)}${isTeam(sb) ? '' : ' — ' + t('enemy')}</h3>` + (b.done ? `${t('hp')} ${Math.ceil(b.hp)}/${d.hp}` : `${t('building')} ${Math.floor(b.progress * 100)}%`) +
+      (d.drop ? ` · ${t('drop')} ${d.drop.map(r => RES_ICON[r]).join('')}` : '') + (d.farm && b.worker && alive(b.worker) ? ` · ${t('worker')} ✓` : '') +
+      (b.queue[0]?.blocked ? `<br><span class="ko">${t('popmax')}</span>` : '');
+  } else if (sel.length === 1) {
     const u = world.get(sel[0], 'Unit'), d = UNITS[u.type], mine = isMine(sel[0]);
-    html = `<h3>${t('u_' + u.type)}${mine ? '' : ' — ' + t('enemy')}</h3>${t('hp')} ${Math.ceil(u.hp)}/${d.hp} · ${t('atk')} ${d.atk} · ${t('armor')} ${d.armor.join('/')} · ${t('range')} ${d.range}`;
+    html = `<h3>${t('u_' + u.type)}${mine ? '' : ' — ' + t('enemy')}</h3>${t('hp')} ${Math.ceil(u.hp)}/${d.hp} · ${t('atk')} ${d.atk} · ${t('armor')} ${d.armor.join('/')} · ${t('range')} ${d.range}` +
+      (u.carry ? ` · ${t('carry')} ${RES_ICON[u.carryRes]} ${u.carry}` : '');
   } else if (sel.length > 1) {
     const cnt = {}; sel.forEach(e => { const ty = world.get(e, 'Unit').type; cnt[ty] = (cnt[ty] || 0) + 1; });
     html = `<h3>${t('units')}: ${sel.length}</h3>` + Object.entries(cnt).map(([k, v]) => `${t('u_' + k)} ×${v}`).join(' · ');
   }
   if (html !== selKey) { $('selinfo').innerHTML = html; selKey = html; }
+  updateCmd(sb);
 }
+const costTxt = c => Object.entries(c).map(([r, v]) => RES_ICON[r] + v).join(' ');
+const keyName = code => code.replace('Key', '');
+let cmdKey = '';
+function updateCmd(sb) {
+  const team = TEAM_OF[LOCAL_PLAYER]; let html = '';
+  if (sb && isTeam(sb) && world.get(sb, 'Bld').done && BLD[world.get(sb, 'Bld').type].train) {
+    const b = world.get(sb, 'Bld');
+    html = BLD[b.type].train.map((u, i) => `<button data-train="${u}" ${canPay(team, UNITS[u].cost) && b.queue.length < 5 ? '' : 'disabled'}>${t('u_' + u)} (${keyName(TRAIN_KEYS[i])})<small>${costTxt(UNITS[u].cost)}</small></button>`).join('');
+    if (b.queue.length) html += `<div class="q">${b.queue.map((q, i) => `<button data-cancel="${i}" title="✕">${t('u_' + q.unit)}${i ? '' : ` ${Math.floor(q.t / UNITS[q.unit].time * 100)}%`}</button>`).join('')}</div>`;
+  } else if (!sb && myVillagers().length) {
+    html = BUILD_LIST.map(k => `<button data-build="${k}" ${canPay(team, BLD[k].cost) ? '' : 'disabled'}>${t('b_' + k)} (${keyName(BLD[k].key)})<small>${costTxt(BLD[k].cost)}</small></button>`).join('');
+  }
+  if (html !== cmdKey) { $('cmd').innerHTML = html; cmdKey = html; }
+}
+$('cmd').addEventListener('mousedown', e => {
+  e.stopPropagation(); const bt = e.target.closest('button'); if (!bt || bt.disabled) return;
+  const sb = selBld();
+  if (bt.dataset.build) startPlacing(bt.dataset.build);
+  else if (bt.dataset.train) train(bt.dataset.train);
+  else if (bt.dataset.cancel && sb) Commands.issue({ type: 'cancel', player: LOCAL_PLAYER, bld: sb, i: +bt.dataset.cancel });
+});
 
 /* ================= LOOP ================= */
 let acc = 0, last = performance.now();
@@ -866,7 +1305,7 @@ function frame(now) {
 }
 
 applyLang(); resize(); requestAnimationFrame(frame);
-window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS };
+window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); } };
 </script>
 </body>
 </html>
