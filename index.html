@@ -36,6 +36,11 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 #keys{font-size:14px;line-height:1.75;margin:0;padding-left:18px;columns:2;column-gap:28px}
 #pause .box{max-width:760px}
 .ok{color:#7ddc7d}.ko{color:#ef6b6b}
+#lobby{background:radial-gradient(#2a2216,#0c0a07)}
+#slots div{padding:4px 8px;border-left:4px solid;margin:3px 0;background:#0003}
+#chat{position:fixed;left:12px;bottom:170px;width:340px;z-index:5;pointer-events:none;font-size:13px}
+#chatlog div{background:#000a;padding:2px 6px;margin-top:2px;border-radius:3px}
+#chatin{width:100%;pointer-events:auto;margin-top:4px}
 #cmd{position:fixed;left:12px;bottom:12px;padding:8px;display:grid;grid-template-columns:repeat(3,92px);gap:6px}
 #cmd:empty{display:none}
 #cmd button{padding:5px 4px;font-size:12px;line-height:1.25;display:flex;flex-direction:column;align-items:center}
@@ -69,14 +74,28 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 <div id="menu" class="overlay">
   <div class="box panel">
     <h1 data-i18n="title"></h1>
+    <label><span data-i18n="name"></span><input id="pname" maxlength="16"></label>
     <label><span data-i18n="seed"></span><input id="seed"></label>
     <label><span data-i18n="lang"></span>
       <select id="lang"><option value="it">Italiano</option><option value="en">English</option></select></label>
     <button id="btn-solo" data-i18n="solo"></button>
-    <button disabled><span data-i18n="host"></span> <span data-i18n="soon"></span></button>
-    <button disabled><span data-i18n="join"></span> <span data-i18n="soon"></span></button>
+    <button id="btn-host" data-i18n="host"></button>
+    <label><input id="joincode" maxlength="6" placeholder="CODICE" style="text-transform:uppercase"><button id="btn-join" data-i18n="join"></button></label>
+    <div id="menumsg" class="ko"></div>
   </div>
 </div>
+
+<div id="lobby" class="overlay hidden">
+  <div class="box panel">
+    <h2><span data-i18n="lobby"></span> · <span data-i18n="code"></span> <b id="lobbycode"></b></h2>
+    <div id="slots"></div>
+    <div id="lobbyseed"></div>
+    <button id="btn-start" data-i18n="startgame"></button>
+    <button id="btn-leave" data-i18n="leave"></button>
+  </div>
+</div>
+
+<div id="chat"><div id="chatlog"></div><input id="chatin" class="hidden" maxlength="120"></div>
 
 <div id="pause" class="overlay hidden">
   <div class="box panel">
@@ -86,7 +105,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
       <li data-i18n="k_right"></li><li data-i18n="k_amove"></li><li data-i18n="k_stop"></li><li data-i18n="k_groups"></li>
       <li data-i18n="k_del"></li><li data-i18n="k_pan"></li><li data-i18n="k_zoom"></li><li data-i18n="k_ping"></li>
       <li data-i18n="k_home"></li><li data-i18n="k_mini"></li><li data-i18n="k_esc"></li>
-      <li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li>
+      <li data-i18n="k_chat"></li><li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li>
     </ul>
     <button id="btn-resume" data-i18n="start"></button>
     <button id="btn-menu" data-i18n="toMenu"></button>
@@ -104,6 +123,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 import * as THREE from 'three';
 import * as YUKA from 'yuka';
 
+const $ = id => document.getElementById(id);
 /* ================= CONFIG ================= */
 const CFG = {
   MAP: 200, TICK_MS: 50, BASE_OFF: 22,
@@ -119,7 +139,7 @@ const RES_ICON = { food: '🍖', wood: '🪵', stone: '🪨', metal: '⚙️', g
 const DT = CFG.TICK_MS / 1000;
 const PLAYER_COLORS = [0x3b82f6, 0x22c55e, 0xeab308, 0xdc2626, 0xf97316, 0xa855f7];
 const TEAM_OF = [0, 0, 0, 1, 1, 1];
-const LOCAL_PLAYER = 0;
+let LOCAL_PLAYER = 0;          // slot del giocatore su questo browser (cambia in multiplayer)
 const T = { GRASS:0, WATER:1, FORD:2, TREE:3, STONE:4, METAL:5, GOLD:6 };
 const T_KEY = ['t_grass','t_water','t_ford','t_tree','t_stone','t_metal','t_gold'];
 const T_COLOR = [[86,128,58],[44,98,150],[96,140,160],[44,88,40],[128,128,124],[92,96,112],[212,175,55]];
@@ -176,7 +196,10 @@ const STR = {
     k_build:'B + lettera: costruisci (popolani)', k_gather:'Click destro su risorsa/cantiere: raccogli/costruisci', k_idle:'. (punto): popolano inattivo',
     k_train:'Q W E: addestra (edificio selezionato) · click destro: punto di raccolta',
     h_place:'Click sinistro: piazza · Shift: piazza altri · Esc/click destro: annulla', h_build:'Costruisci: premi la lettera dell\'edificio (Esc annulla)',
-    building:'In costruzione', carry:'Trasporta', queue:'Coda', popmax:'Popolazione al massimo!', nores:'Risorse insufficienti', worker:'Contadino', drop:'Deposito' },
+    building:'In costruzione', carry:'Trasporta', queue:'Coda', popmax:'Popolazione al massimo!', nores:'Risorse insufficienti', worker:'Contadino', drop:'Deposito',
+    name:'Nome', lobby:'Lobby', code:'codice', startgame:'Avvia partita', leave:'Esci', slot_cpu:'CPU', you:'tu', host_tag:'host',
+    connecting:'Connessione…', e_conn:'Connessione fallita', e_full:'Partita piena o già iniziata', e_hostgone:'L\'host si è disconnesso',
+    left:'si è disconnesso, lo slot passa alla CPU', joined:'è entrato', hostpause:'Pausa dell\'host', k_chat:'Invio: chat di squadra · Alt+click minimappa: ping', waithost:'In attesa dell\'host…' },
   en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
     seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
     pop:'Pop', controls:'Controls', start:'Start / Resume', toMenu:'Main menu',
@@ -195,7 +218,10 @@ const STR = {
     k_build:'B + letter: build (villagers)', k_gather:'Right click resource/site: gather/build', k_idle:'. (period): idle villager',
     k_train:'Q W E: train (building selected) · right click: rally point',
     h_place:'Left click: place · Shift: place more · Esc/right click: cancel', h_build:'Build: press the building letter (Esc cancels)',
-    building:'Under construction', carry:'Carrying', queue:'Queue', popmax:'Population maxed!', nores:'Not enough resources', worker:'Farmer', drop:'Drop site' },
+    building:'Under construction', carry:'Carrying', queue:'Queue', popmax:'Population maxed!', nores:'Not enough resources', worker:'Farmer', drop:'Drop site',
+    name:'Name', lobby:'Lobby', code:'code', startgame:'Start game', leave:'Leave', slot_cpu:'CPU', you:'you', host_tag:'host',
+    connecting:'Connecting…', e_conn:'Connection failed', e_full:'Game full or already started', e_hostgone:'The host disconnected',
+    left:'disconnected, slot goes to CPU', joined:'joined', hostpause:'Paused by host', k_chat:'Enter: team chat · Alt+click minimap: ping', waithost:'Waiting for host…' },
 };
 let lang = localStorage.getItem('rts_lang') || 'it';
 const t = k => STR[lang][k] ?? k;
@@ -373,7 +399,7 @@ function pathSystem(w) {
   }
 }
 function setOrder(e, order) {
-  const u = world.get(e, 'Unit'); u.order = order; u.path = null; u.pathPending = false;
+  const u = world.get(e, 'Unit'); u.order = order; u.path = null; u.pathPending = false; u.pathFailed = false;
   if (order.type === 'move' || order.type === 'amove') requestPath(e, order.x, order.z);
 }
 // griglia spaziale per vicini (celle 4x4)
@@ -543,8 +569,9 @@ function setWalk(x0, z0, x1, z1, v) {   // x1/z1 esclusi
   for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) map.walk[map.idx(x, z)] = v;
   nav.rebuildArea(x0, z0, x1 - 1, z1 - 1);
 }
+function cellChanged(c) { map.dirty.push(c); if (net.role === 'host') net.cells.push([c, map.tile[c], map.amount[c]]); }
 function depleteCell(c) {
-  map.tile[c] = T.GRASS; map.amount[c] = 0; map.dirty.push(c);
+  map.tile[c] = T.GRASS; map.amount[c] = 0; cellChanged(c);
   setWalk(c % map.M, Math.floor(c / map.M), c % map.M + 1, Math.floor(c / map.M) + 1, 1);
 }
 function placeOk(type, x0, z0) {
@@ -563,9 +590,13 @@ function createBuilding(type, player, x0, z0, done) {
   world.add(e, 'Pos', { x: x0 + s / 2, z: z0 + s / 2 });
   world.add(e, 'Owner', { player });
   world.add(e, 'Bld', { type, x0, z0, hp: d.hp, done, progress: done ? 1 : 0, queue: [], rally: null, worker: 0, forestT: 0 });
-  for (let z = z0; z < z0 + s; z++) for (let x = x0; x < x0 + s; x++) map.bld[map.idx(x, z)] = e;
-  if (!d.walk) setWalk(x0, z0, x0 + s, z0 + s, 0);
+  occupy(e, type, x0, z0);
   return e;
+}
+function occupy(e, type, x0, z0) {
+  const s = BLD[type].size;
+  for (let z = z0; z < z0 + s; z++) for (let x = x0; x < x0 + s; x++) map.bld[map.idx(x, z)] = e;
+  if (!BLD[type].walk) setWalk(x0, z0, x0 + s, z0 + s, 0);
 }
 function nearestDrop(team, res, x, z) {
   let best = null, bd = 1e9;
@@ -582,6 +613,11 @@ function approach(e, u, p, d, tx, tz) {
   if (stale && !u.pathPending) requestPath(e, tx, tz);
   else followPath(e, u, p, d);
 }
+// fattoria occupata solo se il contadino lavora ancora lì (anche mentre porta il cibo)
+function farmBusy(fe, e) {
+  const w = world.get(fe, 'Bld')?.worker; if (!w || w === e || !alive(w)) return false;
+  const o = world.get(w, 'Unit').order; return (o.farm ?? o.back?.farm) === fe;
+}
 const toIdle = u => { u.order = { type: 'idle' }; u.path = null; };
 function gatherStep(e, u, p, d, o) {
   if (u.pathFailed) {   // vicino irraggiungibile (sacca tra alberi): segnalo e provo altro
@@ -595,7 +631,7 @@ function gatherStep(e, u, p, d, o) {
   let rect;
   if (o.farm) {
     const f = world.get(o.farm, 'Bld');
-    if (!f || !f.done || (f.worker && f.worker !== e && alive(f.worker))) return toIdle(u);
+    if (!f || !f.done || farmBusy(o.farm, e)) return toIdle(u);
     f.worker = e; rect = bldRect(f);
     if (distRect(p.x, p.z, rect) > .05) { const r = rect; approach(e, u, p, d, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); return; }
   } else {
@@ -634,7 +670,7 @@ function returnStep(e, u, p, d, o) {
 // dopo aver finito un edificio: il popolano lavora lì vicino
 function afterBuild(e, u, b) {
   const bd = BLD[b.type];
-  if (bd.farm && (!b.worker || !alive(b.worker))) { u.order = { type: 'gather', farm: u.order.target, res: 'food' }; u.path = null; return; }
+  if (bd.farm && !farmBusy(u.order.target, e)) { u.order = { type: 'gather', farm: u.order.target, res: 'food' }; u.path = null; return; }
   const res = bd.drop?.find(r => r !== 'food'), tile = res && +Object.keys(TILE_RES).find(k => TILE_RES[k] === res);
   const c = tile ? findResCell(tile, b.x0 + bd.size / 2, b.z0 + bd.size / 2, 10) : -1;
   if (c >= 0) { u.order = { type: 'gather', cell: c, tile, res }; u.path = null; } else toIdle(u);
@@ -700,7 +736,7 @@ function buildingSystem(w) {
     if (ng < 1) continue;
     const x = i % M, z = Math.floor(i / M);
     if ([...near(x + .5, z + .5, 1.2)].some(o => { const q = w.get(o, 'Pos'); return alive(o) && Math.floor(q.x) === x && Math.floor(q.z) === z; })) continue;
-    map.saplings.delete(i); map.tile[i] = T.TREE; map.amount[i] = 100; map.dirty.push(i); setWalk(x, z, x + 1, z + 1, 0);
+    map.saplings.delete(i); map.tile[i] = T.TREE; map.amount[i] = 100; cellChanged(i); setWalk(x, z, x + 1, z + 1, 0);
   }
 }
 const pingSystem = w => { for (const e of [...w.query('Ping')]) { const p = w.get(e, 'Ping'); if (--p.ttl <= 0) w.remove(e); } };
@@ -723,7 +759,7 @@ function formation(units, x, z) {
 }
 const Commands = {
   queue: [],
-  issue(cmd) { this.queue.push(cmd); },
+  issue(cmd) { if (net.role === 'client') net.host.send({ t: 'cmd', c: cmd }); else this.queue.push(cmd); },
   handlers: {
     ping(w, c) { const e = w.create(); w.add(e, 'Pos', { x: c.x, z: c.z }); w.add(e, 'Ping', { ttl: 40, max: 40 }); w.add(e, 'Owner', { player: c.player }); },
     move(w, c) {
@@ -1018,7 +1054,8 @@ function drawMinimap() {
 }
 mini.addEventListener('mousedown', e => {
   const s = CFG.MAP / mini.clientWidth, x = e.offsetX * s, z = e.offsetY * s;
-  if (e.button === 2 && selection.size) issueMoveOrAttack(x, z, null);
+  if (e.altKey) Commands.issue({ type: 'ping', player: LOCAL_PLAYER, x, z });
+  else if (e.button === 2 && selection.size) issueMoveOrAttack(x, z, null);
   else camState.target.set(x, 0, z);
   e.stopPropagation();
 });
@@ -1083,7 +1120,14 @@ function issueMoveOrAttack(x, z, target, amove = false) {
 
 const keys = new Set(); const mouse = { x: innerWidth / 2, y: innerHeight / 2, inside: false };
 let drag = null;
+const chatin = $('chatin');
 addEventListener('keydown', e => {
+  if (e.target === chatin) {
+    if (e.code === 'Enter') sendChat(chatin.value);
+    if (e.code === 'Enter' || e.code === 'Escape') { chatin.value = ''; chatin.blur(); chatin.classList.add('hidden'); }
+    return;
+  }
+  if (e.code === 'Enter' && (state === 'game' || state === 'lobby')) { chatin.classList.remove('hidden'); chatin.focus(); e.preventDefault(); return; }
   if (state !== 'game') return;
   keys.add(e.code);
   if (e.code === 'Escape') { if (amoveMode) setAmove(false); else if (placing || buildKeys) stopPlacing(); else setPaused(!paused); return; }
@@ -1186,22 +1230,30 @@ function panCamera(dt) {
 
 /* ================= STATO / UI ================= */
 let state = 'menu', paused = false;
-const $ = id => document.getElementById(id);
-function setPaused(v) { paused = v; $('pause').classList.toggle('hidden', !v); }
+// client: la pausa locale apre solo il pannello comandi; la simulazione la ferma solo l'host
+function setPaused(v) { paused = v; $('pause').classList.toggle('hidden', !v); if (net.role === 'host') netSend({ t: 'pause', v }); }
 $('seed').value = Math.random().toString(36).slice(2, 8).toUpperCase();
 $('lang').value = lang;
 $('lang').onchange = e => { lang = e.target.value; localStorage.setItem('rts_lang', lang); applyLang(); };
-$('btn-solo').onclick = () => startGame($('seed').value || 'demo');
+$('pname').value = localStorage.getItem('rts_name') || '';
+$('pname').onchange = () => localStorage.setItem('rts_name', $('pname').value);
+$('btn-solo').onclick = () => { netReset(); LOCAL_PLAYER = 0; startGame($('seed').value || 'demo', [true]); };
+$('btn-host').onclick = () => hostGame();
+$('btn-join').onclick = () => joinGame($('joincode').value);
+$('btn-start').onclick = () => {
+  net.conns.forEach(c => c.send({ t: 'start', seed: net.seed, slots: net.slots, you: c.slot }));
+  startGame(net.seed, net.slots.map(Boolean));
+};
 $('btn-resume').onclick = () => setPaused(false);
-$('btn-menu').onclick = () => { state = 'menu'; setPaused(false); $('hud').classList.add('hidden'); $('menu').classList.remove('hidden'); };
+$('btn-menu').onclick = $('btn-leave').onclick = () => endGame(null);
 
-function spawnStart() {
+function spawnStart(humans) {
   const place = (type, pl, x, z) => { const w = nav.nearestWalkable(x, z, 8); if (w) spawnUnit(type, pl, w[0] + .5, w[1] + .5); };
   // CC condiviso per squadra (proprietario = primo slot della squadra)
   BASES.forEach((bb, team) => createBuilding('cc', team * 3, bb.x - 2, bb.z - 2, true));
-  // popolani del giocatore locale (gli slot CPU arrivano con M5)
-  const b = BASES[0];
-  for (let i = 0; i < 4; i++) place('popolano', LOCAL_PLAYER, b.x + 4 + (i % 2), b.z + 4 + (i >> 1));
+  // popolani per ogni slot umano (gli slot CPU arrivano con M5)
+  const b = BASES[0], off = [[4, 4], [-6, 4], [4, -6]];
+  humans.forEach((h, pl) => { if (h) for (let i = 0; i < 4; i++) place('popolano', pl, b.x + off[pl][0] + (i % 2), b.z + off[pl][1] + (i >> 1)); });
   // squadra nemica di prova (giocatore 3) a ~42 celle dalla base, verso il centro
   const ex = b.x + 30, ez = b.z + 30;
   [['fante', 5], ['arciere', 3], ['lanciere', 2], ['cavaliere', 2]].forEach(([type, n], k) => {
@@ -1209,33 +1261,34 @@ function spawnStart() {
   });
 }
 
-function startGame(seed) {
+function startGame(seed, humans) {
   map = generateMap(seed);
   const t0 = performance.now(); nav = new NavGrid(map); navMs = Math.round(performance.now() - t0);
   world = new World();
-  world.systems = [pathSystem, unitSystem, buildingSystem, projectileSystem, pingSystem];
+  world.systems = net.role === 'client' ? [] : [pathSystem, unitSystem, buildingSystem, projectileSystem, pingSystem];
   world.res = [0, 1].map(() => ({ ...CFG.START_RES }));
   world.rng = mulberry32(hashSeed(seed + ':sim'));
   selection.clear(); pathQueue.length = 0; for (const k in groups) delete groups[k];
   for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear(); waveFlags.length = 0;
   stopPlacing(); setAmove(false);
   buildMapScene(map);
-  spawnStart();
-  camState.target.set(BASES[0].x + 6, 0, BASES[0].z + 6); camState.zoom = CFG.ZOOM_START;
+  if (net.role !== 'client') spawnStart(humans);   // il client riceve tutto dagli snapshot
+  const bb = BASES[TEAM_OF[LOCAL_PLAYER]];
+  camState.target.set(bb.x + 6, 0, bb.z + 6); camState.zoom = CFG.ZOOM_START;
   state = 'game'; acc = 0;
-  $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
+  $('menu').classList.add('hidden'); $('lobby').classList.add('hidden'); $('hud').classList.remove('hidden');
   setPaused(true);
 }
 let navMs = 0;
 
-function simStep() { Commands.drain(world); for (const s of world.systems) s(world); world.tick++; }
+function simStep() { Commands.drain(world); for (const s of world.systems) s(world); world.tick++; if (net.role === 'host' && world.tick % SNAP_EVERY === 0) netBroadcast(); }
 
 const LIBS = { three: !!THREE.REVISION, yuka: typeof YUKA.AStar === 'function', peerjs: typeof window.Peer === 'function' };
 let fps = 0, fpsAcc = 0, fpsN = 0, selKey = '';
 function updateHud(dt) {
   fpsAcc += dt; fpsN++; if (fpsAcc > .5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
   const s = Math.floor(world.tick * CFG.TICK_MS / 1000);
-  $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` + (net.role === 'client' && net.hostPaused ? ' ⏸ ' + t('hostpause') : '');
   const tr = teamRes(TEAM_OF[LOCAL_PLAYER]); for (const r of RES) $('r-' + r).textContent = Math.floor(tr[r]);
   $('r-pop').textContent = `${popOf(LOCAL_PLAYER)}/${popCap(LOCAL_PLAYER)}`;
   const p = screenToGround(...pxToNdc(mouse.x, mouse.y));
@@ -1254,7 +1307,7 @@ function updateHud(dt) {
   if (sb) {
     const b = world.get(sb, 'Bld'), d = BLD[b.type];
     html = `<h3>${t('b_' + b.type)}${isTeam(sb) ? '' : ' — ' + t('enemy')}</h3>` + (b.done ? `${t('hp')} ${Math.ceil(b.hp)}/${d.hp}` : `${t('building')} ${Math.floor(b.progress * 100)}%`) +
-      (d.drop ? ` · ${t('drop')} ${d.drop.map(r => RES_ICON[r]).join('')}` : '') + (d.farm && b.worker && alive(b.worker) ? ` · ${t('worker')} ✓` : '') +
+      (d.drop ? ` · ${t('drop')} ${d.drop.map(r => RES_ICON[r]).join('')}` : '') + (d.farm && farmBusy(sb, 0) ? ` · ${t('worker')} ✓` : '') +
       (b.queue[0]?.blocked ? `<br><span class="ko">${t('popmax')}</span>` : '');
   } else if (sel.length === 1) {
     const u = world.get(sel[0], 'Unit'), d = UNITS[u.type], mine = isMine(sel[0]);
@@ -1289,16 +1342,180 @@ $('cmd').addEventListener('mousedown', e => {
   else if (bt.dataset.cancel && sb) Commands.issue({ type: 'cancel', player: LOCAL_PLAYER, bld: sb, i: +bt.dataset.cancel });
 });
 
+/* ================= RETE (PeerJS, host autoritativo) ================= */
+// Host: simula tutto, riceve comandi, invia delta 10/s su canale affidabile e ordinato (il delta si basa sull'ultimo invio).
+// Client: niente simulazione, applica gli snapshot e interpola.
+const SNAP_EVERY = 2;
+const net = { role: 'solo', peer: null, conns: [], host: null, slots: [], seed: '', code: '', lastSent: new Map(), cells: [], sapKey: '', resKey: '', snapT: 0, hostPaused: false };
+const CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => CODE_CH[b % CODE_CH.length]).join('');
+const myName = () => $('pname').value.trim().slice(0, 16) || 'Player';
+const menuMsg = k => $('menumsg').textContent = k ? t(k) : '';
+const netSend = m => net.conns.forEach(c => c.open && c.send(m));
+function netReset() {
+  net.peer?.destroy();
+  Object.assign(net, { role: 'solo', peer: null, conns: [], host: null, slots: [], lastSent: new Map(), cells: [], sapKey: '', resKey: '', hostPaused: false });
+  $('chatlog').innerHTML = '';
+}
+function endGame(reason) {
+  netReset(); state = 'menu'; setPaused(false); stopPlacing();
+  ['hud', 'lobby'].forEach(id => $(id).classList.add('hidden')); $('menu').classList.remove('hidden'); menuMsg(reason);
+}
+function hostGame(tries = 0) {
+  netReset(); menuMsg('connecting');
+  const code = newCode(), peer = net.peer = new Peer('rtsdemo-' + code);
+  peer.on('open', () => {
+    Object.assign(net, { role: 'host', code, slots: [myName(), null, null], seed: $('seed').value || 'demo' });
+    LOCAL_PLAYER = 0; menuMsg(null); showLobby();
+  });
+  peer.on('error', err => { if (err.type === 'unavailable-id' && tries < 3) hostGame(tries + 1); else if (state !== 'game') menuMsg('e_conn'); });
+  peer.on('connection', conn => { conn.on('data', m => hostOnData(conn, m)); conn.on('close', () => hostOnClose(conn)); });
+}
+// trust boundary: tutto ciò che arriva dai client è da validare
+const NUM_KEYS = ['x', 'z', 'x0', 'z0', 'i', 'target', 'farm', 'cell'];   // bld è id o nome edificio: gli handler lo controllano
+function sanitizeCmd(c) {
+  if (!c || typeof c !== 'object' || !Object.hasOwn(Commands.handlers, c.type)) return null;
+  if (NUM_KEYS.some(k => k in c && !Number.isFinite(c[k]))) return null;
+  c.units = Array.isArray(c.units) ? c.units.filter(Number.isInteger).slice(0, 200) : [];
+  return c;
+}
+function hostOnData(conn, m) {
+  if (!m || typeof m !== 'object') return;
+  if (m.t === 'hello' && conn.slot === undefined) {
+    const slot = net.slots.findIndex((n, i) => i > 0 && !n);
+    if (state !== 'lobby' || slot < 0) { conn.send({ t: 'end', reason: 'e_full' }); setTimeout(() => conn.close(), 500); return; }
+    conn.slot = slot; net.slots[slot] = String(m.name || '?').slice(0, 16); net.conns.push(conn);
+    sysChat(net.slots[slot] + ' ' + t('joined')); lobbyBroadcast();
+  } else if (conn.slot === undefined) return;
+  else if (m.t === 'cmd') { const c = sanitizeCmd(m.c); if (c) { c.player = conn.slot; Commands.queue.push(c); } }
+  else if (m.t === 'chat') chatAll(net.slots[conn.slot] ?? '?', m.text, conn.slot);
+}
+function hostOnClose(conn) {
+  if (conn.slot === undefined || !net.conns.includes(conn)) return;
+  net.conns = net.conns.filter(c => c !== conn);
+  const name = net.slots[conn.slot]; net.slots[conn.slot] = null;   // lo slot passa alla CPU, non si riprende
+  sysChat(name + ' ' + t('left'));
+  if (state === 'lobby') lobbyBroadcast();
+}
+function lobbyBroadcast() { net.conns.forEach(c => c.send({ t: 'lobby', code: net.code, slots: net.slots, seed: net.seed, you: c.slot })); renderLobby(); }
+function joinGame(code) {
+  code = String(code).toUpperCase().trim();
+  netReset(); if (!/^[A-Z0-9]{6}$/.test(code)) return menuMsg('e_conn');
+  menuMsg('connecting');
+  const peer = net.peer = new Peer();
+  peer.on('open', () => {
+    const conn = net.host = peer.connect('rtsdemo-' + code, { reliable: true, serialization: 'json' });
+    conn.on('open', () => { net.role = 'client'; conn.send({ t: 'hello', name: myName() }); });
+    conn.on('data', clientOnData);
+    conn.on('close', () => { if (net.role === 'client') endGame('e_hostgone'); });
+  });
+  peer.on('error', () => { if (net.role !== 'client') menuMsg('e_conn'); else endGame('e_hostgone'); });
+}
+function clientOnData(m) {
+  if (m.t === 'lobby') { Object.assign(net, { slots: m.slots, code: m.code, seed: m.seed }); LOCAL_PLAYER = m.you; menuMsg(null); showLobby(); }
+  else if (m.t === 'start') { LOCAL_PLAYER = m.you; net.hostPaused = true; startGame(m.seed, m.slots.map(Boolean)); }
+  else if (m.t === 'snap') applySnap(m);
+  else if (m.t === 'pause') net.hostPaused = m.v;
+  else if (m.t === 'chat') addChat(m.name, m.text, m.player);
+  else if (m.t === 'end') endGame(m.reason);
+}
+function showLobby() { state = 'lobby'; $('menu').classList.add('hidden'); $('lobby').classList.remove('hidden'); renderLobby(); }
+function renderLobby() {
+  $('lobbycode').textContent = net.code; $('slots').innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const d = document.createElement('div'), nm = i < 3 ? net.slots[i] : null;
+    d.style.borderColor = hex(PLAYER_COLORS[i]);
+    d.textContent = `${i < 3 ? '⚔' : '☠'} ${nm ?? t('slot_cpu')}${i === LOCAL_PLAYER ? ` (${t('you')})` : ''}${i === 0 && nm ? ` — ${t('host_tag')}` : ''}`;
+    $('slots').append(d);
+  }
+  if (net.role === 'host') {
+    if (!$('lseed')) { $('lobbyseed').innerHTML = `<label>${t('seed')}<input id="lseed"></label>`; $('lseed').value = net.seed;
+      $('lseed').onchange = () => { net.seed = $('lseed').value || 'demo'; lobbyBroadcast(); }; }
+  } else $('lobbyseed').textContent = `${t('seed')}: ${net.seed}`;
+  $('btn-start').classList.toggle('hidden', net.role !== 'host');
+}
+// chat: testo sempre via textContent (mai HTML dai peer)
+function addChat(name, text, player) {
+  const d = document.createElement('div'), n = document.createElement('b');
+  if (name) { n.textContent = name + ': '; n.style.color = hex(PLAYER_COLORS[player] ?? 0xffffff); d.append(n); }
+  d.append(String(text).slice(0, 120)); $('chatlog').append(d);
+  while ($('chatlog').children.length > 8) $('chatlog').firstChild.remove();
+  setTimeout(() => d.remove(), 20000);
+}
+function chatAll(name, text, player) { text = String(text ?? '').slice(0, 120); addChat(name, text, player); netSend({ t: 'chat', name, text, player }); }
+const sysChat = text => chatAll('', text, -1);
+function sendChat(text) {
+  text = text.trim(); if (!text) return;
+  if (net.role === 'client') net.host.send({ t: 'chat', text }); else chatAll(myName(), text, LOCAL_PLAYER);
+}
+const r2 = v => Math.round(v * 100) / 100;
+function encodeEnt(e) {
+  const w = world, pl = w.get(e, 'Owner')?.player, u = w.get(e, 'Unit'), b = w.get(e, 'Bld'), pr = w.get(e, 'Proj'), g = w.get(e, 'Ping');
+  if (u) { const p = w.get(e, 'Pos'); return ['u', u.type, pl, r2(p.x), r2(p.z), r2(p.face), Math.ceil(u.hp), u.carry || 0, u.carryRes || 0, u.attackAnim ?? -99, u.order.type, u.order.farm ?? u.order.back?.farm ?? 0]; }
+  if (b) return ['b', b.type, pl, b.x0, b.z0, b.done ? 1 : 0, r2(b.progress), Math.ceil(b.hp), b.queue.map(q => [q.unit, q.player, Math.floor(q.t * 10) / 10, q.blocked ? 1 : 0]), b.rally, b.worker];
+  if (pr) return ['p', r2(pr.x), r2(pr.z), r2(pr.tx), r2(pr.tz)];
+  const p = w.get(e, 'Pos'); return ['g', pl, r2(p.x), r2(p.z), g.ttl, g.max];
+}
+// shortcut: le unità in movimento si reinviano intere a ogni snapshot (~60 B l'una); se la banda non basta, quantizzare in binario
+function netBroadcast() {
+  const ch = [], seen = new Set();
+  for (const name of ['Bld', 'Unit', 'Proj', 'Ping']) for (const e of world.query(name)) {
+    const a = encodeEnt(e), s = JSON.stringify(a); seen.add(e);
+    if (net.lastSent.get(e) !== s) { net.lastSent.set(e, s); ch.push([e, ...a]); }
+  }
+  const rm = []; for (const e of net.lastSent.keys()) if (!seen.has(e)) { rm.push(e); net.lastSent.delete(e); }
+  const msg = { t: 'snap', tick: world.tick, ch, rm };
+  const rs = JSON.stringify(world.res); if (rs !== net.resKey) { net.resKey = rs; msg.res = world.res; }
+  if (net.cells.length) { msg.cells = net.cells; net.cells = []; }
+  const sp = JSON.stringify([...map.saplings]); if (sp !== net.sapKey) { net.sapKey = sp; msg.sap = [...map.saplings]; }
+  netSend(msg);
+}
+function applySnap(m) {
+  if (state !== 'game') return;
+  const w = world;
+  for (const e of w.query('Pos')) { const p = w.get(e, 'Pos'); p.px = p.x; p.pz = p.z; }
+  for (const e of w.query('Proj')) { const p = w.get(e, 'Proj'); p.px = p.x; p.pz = p.z; }
+  for (const [e, k, ...a] of m.ch) {
+    if (k === 'u') {
+      const [type, player, x, z, face, hp, carry, carryRes, attackAnim, otype, farm] = a;
+      if (!w.has(e, 'Unit')) { w.add(e, 'Pos', { x, z, px: x, pz: z }); w.add(e, 'Owner', { player }); w.add(e, 'Unit', { type }); }
+      Object.assign(w.get(e, 'Pos'), { x, z, face });
+      Object.assign(w.get(e, 'Unit'), { hp, carry, carryRes: carryRes || undefined, attackAnim, order: { type: otype, farm: farm || undefined } });
+    } else if (k === 'b') {
+      const [type, player, x0, z0, done, progress, hp, queue, rally, worker] = a;
+      if (!w.has(e, 'Bld')) { const s = BLD[type].size; w.add(e, 'Pos', { x: x0 + s / 2, z: z0 + s / 2 }); w.add(e, 'Owner', { player }); w.add(e, 'Bld', { type, x0, z0 }); occupy(e, type, x0, z0); }
+      Object.assign(w.get(e, 'Bld'), { done: !!done, progress, hp, rally, worker, queue: queue.map(([unit, player, t, blocked]) => ({ unit, player, t, blocked: !!blocked })) });
+    } else if (k === 'p') {
+      const [x, z, tx, tz] = a;
+      if (!w.has(e, 'Proj')) w.add(e, 'Proj', { x, z, px: x, pz: z, tx, tz }); else Object.assign(w.get(e, 'Proj'), { x, z, tx, tz });
+    } else if (k === 'g') {
+      const [player, x, z, ttl, max] = a;
+      if (!w.has(e, 'Ping')) { w.add(e, 'Pos', { x, z, px: x, pz: z }); w.add(e, 'Owner', { player }); w.add(e, 'Ping', { ttl, max }); } else w.get(e, 'Ping').ttl = ttl;
+    }
+  }
+  for (const e of m.rm) { w.remove(e); selection.delete(e); }
+  if (m.res) w.res = m.res;
+  if (m.cells) for (const [c, tile, amount] of m.cells) {
+    map.tile[c] = tile; map.amount[c] = amount; map.dirty.push(c);
+    const x = c % map.M, z = Math.floor(c / map.M); setWalk(x, z, x + 1, z + 1, tile === T.TREE ? 0 : 1);
+  }
+  if (m.sap) map.saplings = new Map(m.sap);
+  w.tick = m.tick; net.snapT = performance.now(); net.hostPaused = false;
+  buildSpatial(w);
+}
+
 /* ================= LOOP ================= */
 let acc = 0, last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   const dtMs = Math.min(250, now - last); last = now;
   if (state !== 'game') return;
-  if (!paused) { acc += dtMs; let n = 0; while (acc >= CFG.TICK_MS && n++ < 5) { simStep(); acc -= CFG.TICK_MS; } if (n >= 5) acc = 0; }
+  let alpha;
+  if (net.role === 'client') alpha = Math.min(1, (now - net.snapT) / (CFG.TICK_MS * SNAP_EVERY));
+  else if (!paused) { acc += dtMs; let n = 0; while (acc >= CFG.TICK_MS && n++ < 5) { simStep(); acc -= CFG.TICK_MS; } if (n >= 5) acc = 0; }
   panCamera(dtMs / 1000);
   updateCamera();
-  syncRender(now, paused ? 1 : Math.min(1, acc / CFG.TICK_MS));
+  syncRender(now, alpha ?? (paused ? 1 : Math.min(1, acc / CFG.TICK_MS)));
   renderer.render(scene, cam);
   drawMinimap();
   updateHud(dtMs / 1000);
