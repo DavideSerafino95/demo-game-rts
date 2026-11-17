@@ -37,6 +37,8 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 #pause .box{max-width:760px}
 .ok{color:#7ddc7d}.ko{color:#ef6b6b}
 #lobby{background:radial-gradient(#2a2216,#0c0a07)}
+#end{background:#000a}
+#endstats{border-collapse:collapse;font-size:14px}#endstats td,#endstats th{padding:4px 12px;border-bottom:1px solid var(--line);text-align:right}#endstats td:first-child,#endstats th:first-child{text-align:left}
 #slots div{padding:4px 8px;border-left:4px solid;margin:3px 0;background:#0003}
 #chat{position:fixed;left:12px;bottom:260px;width:340px;z-index:5;pointer-events:none;font-size:13px}
 #chatlog div{background:#000a;padding:2px 6px;margin-top:2px;border-radius:3px}
@@ -100,6 +102,15 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
   </div>
 </div>
 
+<div id="end" class="overlay hidden">
+  <div class="box panel">
+    <h1 id="endtitle"></h1>
+    <table id="endstats"></table>
+    <button id="btn-watch" data-i18n="keepwatch"></button>
+    <button id="btn-endmenu" data-i18n="toMenu"></button>
+  </div>
+</div>
+
 <div id="chat"><div id="chatlog"></div><input id="chatin" class="hidden" maxlength="120"></div>
 
 <div id="pause" class="overlay hidden">
@@ -110,8 +121,10 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
       <li data-i18n="k_right"></li><li data-i18n="k_amove"></li><li data-i18n="k_stop"></li><li data-i18n="k_groups"></li>
       <li data-i18n="k_del"></li><li data-i18n="k_pan"></li><li data-i18n="k_zoom"></li><li data-i18n="k_ping"></li>
       <li data-i18n="k_home"></li><li data-i18n="k_mini"></li><li data-i18n="k_esc"></li>
-      <li data-i18n="k_chat"></li><li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li><li data-i18n="k_hero"></li><li data-i18n="k_tech"></li>
+      <li data-i18n="k_chat"></li><li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li><li data-i18n="k_hero"></li><li data-i18n="k_tech"></li><li data-i18n="k_wall"></li>
     </ul>
+    <label><span data-i18n="vol_sfx"></span><input id="vsfx" type="range" min="0" max="1" step=".05"></label>
+    <label><span data-i18n="vol_music"></span><input id="vmusic" type="range" min="0" max="1" step=".05"></label>
     <button id="btn-resume" data-i18n="start"></button>
     <button id="btn-menu" data-i18n="toMenu"></button>
   </div>
@@ -195,6 +208,8 @@ const BLD = {
   scuderia:    { size: 3, hp: 900, cost: { wood: 150, stone: 50 }, time: 30, train: ['cavaliere'], key: 'KeyU', color: 0x9b8566 },
   sala:        { size: 3, hp: 900, cost: { wood: 150, stone: 100 }, time: 30, train: 'hero', key: 'KeyE', color: 0xb69ac8 },   // truppa unica del proprio eroe
   fabbro:      { size: 3, hp: 700, cost: { wood: 150, metal: 50 }, time: 25, key: 'KeyA', color: 0x7d7468 },
+  torre:       { size: 2, hp: 700, cost: { wood: 25, stone: 100 }, time: 25, tower: { range: 7, atk: 8, cd: 1.6 }, key: 'KeyT', color: 0x9a948a },
+  mura:        { size: 1, hp: 250, cost: { stone: 5 }, time: 3, wall: true, key: 'KeyW', color: 0x8e8b84 },   // trascina per una linea dritta
   officina:    { size: 4, hp: 1000, cost: { wood: 200, metal: 100 }, time: 35, train: ['ariete'], era: 2, key: 'KeyO', color: 0x8a6f4d },
 };
 // Ricerche: valgono per tutta la squadra, una volta sola. leader = solo lo slot 0 della squadra (l'host) o la CPU capo.
@@ -212,6 +227,7 @@ const TECH = {
   frecce2:  { bld: 'fabbro', era: 2, req: 'frecce1', cost: { wood: 200, gold: 200 }, time: 60, atk: { ranged: 1 } },
   corazza2: { bld: 'fabbro', era: 2, req: 'corazza1', cost: { metal: 220, gold: 220 }, time: 65, armor: 1 },
   vigore:   { bld: 'caserma', era: 2, cost: { food: 200, gold: 150 }, time: 45, hp: .15 },
+  torri:    { bld: 'fabbro', era: 2, cost: { stone: 150, gold: 150 }, time: 45, tower: 4 },
 };
 const TECH_KEYS = ['KeyZ', 'KeyX', 'KeyC', 'KeyV'];
 const BUILD_LIST = Object.keys(BLD).filter(k => BLD[k].key);
@@ -315,8 +331,10 @@ const STR = {
     b_fabbro:'Fabbro', b_officina:'Officina d\'assedio', era:'Era', needera:'Serve l\'Era II', leaderonly:'Solo l\'host', era_a:'⚔ La squadra 1 passa all\'Era II!', era_b:'☠ La squadra 2 passa all\'Era II!',
     r_era2:'Avanza all\'Era II', r_carriola:'Carriola (+5 carico)', r_aratro:'Aratro (+15% cibo)', r_ascia:'Ascia (+15% legno)', r_piccone:'Piccone (+15% minerali)',
     r_lame1:'Lame I (+2 mischia)', r_frecce1:'Frecce I (+1 distanza)', r_corazza1:'Corazza I (+1 armatura)', r_lame2:'Lame II (+2 mischia)', r_frecce2:'Frecce II (+1 distanza)', r_corazza2:'Corazza II (+1 armatura)', r_vigore:'Vigore (+15% PV truppe)',
-    k_tech:'Z X C V: ricerche (edificio selezionato)',
-    diff:'Difficoltà CPU', easy:'Facile', normal:'Normale', hard:'Difficile', victory:'🏆 Vittoria! Il Centro Città nemico è caduto', defeat:'💀 Sconfitta: il vostro Centro Città è caduto' },
+    k_tech:'Z X C V: ricerche (edificio selezionato)', k_wall:'B+W: mura (trascina in linea dritta) · B+T: torre',
+    b_torre:'Torre di guardia', b_mura:'Mura', r_torri:'Torri II (+4 attacco torri)', vol_sfx:'Volume effetti', vol_music:'Volume musica',
+    keepwatch:'Continua a guardare', you_team:'La tua squadra', s_gathered:'Risorse raccolte', s_trained:'Unità addestrate', s_kills:'Nemici uccisi', s_lost:'Unità perse', s_blds:'Edifici distrutti',
+    diff:'Difficoltà CPU', easy:'Facile', normal:'Normale', hard:'Difficile', victory:'🏆 Vittoria!', defeat:'💀 Sconfitta' },
   en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
     seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
     pop:'Pop', controls:'Controls', start:'Start / Resume', toMenu:'Main menu',
@@ -346,8 +364,10 @@ const STR = {
     b_fabbro:'Blacksmith', b_officina:'Siege Workshop', era:'Age', needera:'Requires Age II', leaderonly:'Host only', era_a:'⚔ Team 1 advances to Age II!', era_b:'☠ Team 2 advances to Age II!',
     r_era2:'Advance to Age II', r_carriola:'Wheelbarrow (+5 carry)', r_aratro:'Plow (+15% food)', r_ascia:'Axe (+15% wood)', r_piccone:'Pickaxe (+15% minerals)',
     r_lame1:'Blades I (+2 melee)', r_frecce1:'Arrows I (+1 ranged)', r_corazza1:'Armor I (+1 armor)', r_lame2:'Blades II (+2 melee)', r_frecce2:'Arrows II (+1 ranged)', r_corazza2:'Armor II (+1 armor)', r_vigore:'Vigor (+15% troop HP)',
-    k_tech:'Z X C V: research (building selected)',
-    diff:'CPU difficulty', easy:'Easy', normal:'Normal', hard:'Hard', victory:'🏆 Victory! The enemy Town Center has fallen', defeat:'💀 Defeat: your Town Center has fallen' },
+    k_tech:'Z X C V: research (building selected)', k_wall:'B+W: walls (drag a straight line) · B+T: tower',
+    b_torre:'Watch Tower', b_mura:'Wall', r_torri:'Towers II (+4 tower attack)', vol_sfx:'Effects volume', vol_music:'Music volume',
+    keepwatch:'Keep watching', you_team:'Your team', s_gathered:'Resources gathered', s_trained:'Units trained', s_kills:'Enemies killed', s_lost:'Units lost', s_blds:'Buildings destroyed',
+    diff:'CPU difficulty', easy:'Easy', normal:'Normal', hard:'Hard', victory:'🏆 Victory!', defeat:'💀 Defeat' },
 };
 let lang = localStorage.getItem('rts_lang') || 'it';
 const t = k => STR[lang][k] ?? k;
@@ -537,8 +557,8 @@ const troop = d => !d.hero && d.cls !== 'civ' && d.cls !== 'beast';   // le rice
 function tfx(team) {
   const list = world.tech?.[team] ?? [], key = list.join();
   if (world.tfxKey?.[team] === key) return world.tfxC[team];
-  const f = { melee: 0, ranged: 0, armor: 0, carry: 0, hp: 0, gather: {} };
-  for (const k of list) { const t = TECH[k]; f.melee += t.atk?.melee || 0; f.ranged += t.atk?.ranged || 0; f.armor += t.armor || 0; f.carry += t.carry || 0; f.hp += t.hp || 0;
+  const f = { melee: 0, ranged: 0, armor: 0, carry: 0, hp: 0, tower: 0, gather: {} };
+  for (const k of list) { const t = TECH[k]; f.tower += t.tower || 0; f.melee += t.atk?.melee || 0; f.ranged += t.atk?.ranged || 0; f.armor += t.armor || 0; f.carry += t.carry || 0; f.hp += t.hp || 0;
     for (const r in t.gather) f.gather[r] = (f.gather[r] || 0) + t.gather[r]; }
   (world.tfxKey ||= [])[team] = key; (world.tfxC ||= [])[team] = f; return f;
 }
@@ -623,10 +643,11 @@ const BLD_ARMOR = [2, 6];   // mischia / distanza: le frecce fanno poco agli edi
 function destroyBuilding(e) {
   const b = world.get(e, 'Bld'), team = teamOf(e);
   unoccupy(e); world.remove(e); selection.delete(e);
+  if (team < 2) world.stats[1 - team].blds++;
   if (b.type === 'cc' && world.over == null) world.over = team;   // squadra sconfitta
 }
 function damage(attacker, target, dmgBase) {
-  const ad = alive(attacker) ? st(attacker) : null, kind = ad?.kind === 'ranged' ? 1 : 0;
+  const ad = alive(attacker) ? st(attacker) : null, tw = !ad && !!BLD[world.get(attacker, 'Bld')?.type]?.tower, kind = ad?.kind === 'ranged' || tw ? 1 : 0;
   const tb = world.get(target, 'Bld');
   if (tb) {
     tb.hp -= Math.max(1, dmgBase - (ad?.pierce ? 0 : BLD_ARMOR[kind])); if (tb.hp <= 0) destroyBuilding(target);
@@ -637,13 +658,15 @@ function damage(attacker, target, dmgBase) {
   tu.hp -= Math.max(1, dmgBase - (ad?.pierce ? 0 : td.armor[kind])) * mult;
   tu.lastHit = world.tick;
   // reazione: se inattivo, risponde
-  if (tu.order.type === 'idle' && ad && !td.siege) tu.order = { type: 'attack', target: attacker, auto: true };   // gli arieti non rispondono alle unità
+  if (tu.order.type === 'idle' && (ad || tw) && !td.siege) tu.order = { type: 'attack', target: attacker, auto: true };   // gli arieti non rispondono alle unità
   if (tu.hp <= 0) killUnit(target, attacker);
 }
 function killUnit(e, killer) {
   const u = world.get(e, 'Unit'), d = UNITS[u.type], pl = world.get(e, 'Owner').player, p = world.get(e, 'Pos');
+  if (TEAM_OF[pl] < 2) world.stats[TEAM_OF[pl]].lost++;
   if (alive(killer) && teamOf(killer) !== TEAM_OF[pl]) {
-    const kt = teamOf(killer), xp = d.xp ?? 10 + RES.reduce((a, r) => a + (d.cost[r] || 0), 0) / 5;
+    const kt = teamOf(killer); if (kt < 2) world.stats[kt].kills++;
+    const xp = d.xp ?? 10 + RES.reduce((a, r) => a + (d.cost[r] || 0), 0) / 5;
     if (d.loot && kt < 2) teamRes(kt).gold += d.loot;
     // xp agli eroi della squadra che uccide, se vicini
     world.heroes.forEach((hs, hp) => { if (TEAM_OF[hp] === kt && alive(hs.e)) { const q = world.get(hs.e, 'Pos'); if (Math.hypot(q.x - p.x, q.z - p.z) < 12) gainXp(hp, xp); } });
@@ -920,7 +943,8 @@ function returnStep(e, u, p, d, o) {
   const r = bldRect(world.get(dep, 'Bld'));
   if (distRect(p.x, p.z, r) <= .9) {
     const food = u.carryRes === 'food' ? heroBonus(world.get(e, 'Owner').player).food || 1 : 1;
-    teamRes(team)[u.carryRes] += u.carry * food * (team === 1 ? DIFF[world.diff].mult : 1); u.carry = 0; u.gatherT = 0;
+    const got = u.carry * food * (team === 1 ? DIFF[world.diff].mult : 1);
+    teamRes(team)[u.carryRes] += got; world.stats[team].gathered += got; u.carry = 0; u.gatherT = 0;
     if (o.back) { u.order = o.back; u.path = null; } else toIdle(u);
   } else { const ep = edgePoint(p.x, p.z, r); approach(e, u, p, d, ep.x, ep.z); }
 }
@@ -928,6 +952,10 @@ function returnStep(e, u, p, d, o) {
 function afterBuild(e, u, b) {
   const bd = BLD[b.type];
   if (bd.farm && !farmBusy(u.order.target, e)) { u.order = { type: 'gather', farm: u.order.target, res: 'food' }; u.path = null; return; }
+  // cantiere della squadra entro 6 celle (es. il prossimo segmento di mura): si continua lì
+  const p0 = world.get(e, 'Pos'); let nx = 0, nd = 6;
+  for (const o of world.query('Bld')) { const ob = world.get(o, 'Bld'); if (ob.done || teamOf(o) !== teamOf(e)) continue; const dd = distRect(p0.x, p0.z, bldRect(ob)); if (dd < nd) { nd = dd; nx = o; } }
+  if (nx) { u.order = { type: 'build', target: nx }; u.path = null; return; }
   const res = bd.drop?.find(r => r !== 'food'), tile = res && +Object.keys(TILE_RES).find(k => TILE_RES[k] === res);
   const p = world.get(e, 'Pos'), c = tile ? findResCell(tile, b.x0 + bd.size / 2, b.z0 + bd.size / 2, 10, null, nav.compAt(p.x, p.z)) : -1;
   if (c >= 0) { u.order = { type: 'gather', cell: c, tile, res }; u.path = null; } else toIdle(u);
@@ -953,6 +981,7 @@ function popCap(pl) {
 function spawnFrom(be, type, player) {
   const b = world.get(be, 'Bld'), r = bldRect(b), target = b.rally || { x: r.x1 + 1, z: r.z1 + 1 };
   const ep = edgePoint(target.x, target.z, r), u = spawnUnit(type, player, ep.x, ep.z);
+  if (!UNITS[type].hero) world.stats[TEAM_OF[player]].trained++;
   if (!b.rally) return u;
   const rc = resAt(b.rally.x, b.rally.z), c = rc >= 0 ? findResCell(map.tile[rc], b.rally.x, b.rally.z, 4, null, nav.compAt(ep.x, ep.z)) : -1, rb = bldAt(b.rally.x, b.rally.z);
   if (type === 'popolano' && c >= 0) setOrder(u, { type: 'gather', cell: c, tile: map.tile[c], res: TILE_RES[map.tile[c]] });
@@ -1015,6 +1044,14 @@ function buildingSystem(w) {
       if (q.t >= T0 && !q.blocked) { b.queue.shift(); if (tk) finishTech(TEAM_OF[q.player], tk); else spawnFrom(e, q.unit, q.player); }
       else if (q.blocked && b.queue.some(o => !o.blocked && o !== q)) b.queue.push(b.queue.shift());   // unità ferma per popolazione: passa avanti il resto (es. ricerche)
     }
+    // torre: tira al nemico più vicino in gittata (Arciere: +1, ricerca Torri: +attacco)
+    if (d.tower && (b.cd = (b.cd || 0) - DT) <= 0) {
+      const c = w.get(e, 'Pos'), tm = teamOf(e), pl = w.get(e, 'Owner').player, r = d.tower.range + (heroBonus(pl).range || 0) + d.size / 2;
+      let tg = null, bd = 1e9;
+      for (const o of unitsIn(c.x, c.z, r, o => teamOf(o) !== tm && !w.get(o, 'Unit').hid)) { const q = w.get(o, 'Pos'), dd = Math.hypot(q.x - c.x, q.z - c.z); if (dd < bd) { bd = dd; tg = o; } }
+      if (tg) { b.cd = d.tower.cd; const q = w.get(tg, 'Pos');
+        w.add(w.create(), 'Proj', { x: c.x, z: c.z, px: c.x, pz: c.z, target: tg, tx: q.x, tz: q.z, dmg: d.tower.atk + tfx(tm).tower, from: e, speed: 14, player: pl }); }
+    }
     // guardaboschi: pianta alberelli nel raggio
     if (d.forest && (b.forestT += DT) >= CFG.FOREST_EVERY) {
       b.forestT = 0;
@@ -1048,7 +1085,7 @@ const DIFF = {
   normal: { mult: 1,   think: 20, vil: 14, wave0: 360, waveN: 6 },
   hard:   { mult: 1.25, think: 10, vil: 18, wave0: 240, waveN: 6 },
 };
-const AI_PLAN = [['segheria', 1], ['caserma', 1], ['miniera', 1], ['arcieria', 1], ['sala', 1], ['fabbro', 1], ['guardaboschi', 1], ['mulino', 1], ['scuderia', 1], ['caserma', 2], ['officina', 1], ['arcieria', 2]];
+const AI_PLAN = [['segheria', 1], ['caserma', 1], ['miniera', 1], ['arcieria', 1], ['sala', 1], ['fabbro', 1], ['torre', 1], ['guardaboschi', 1], ['mulino', 1], ['scuderia', 1], ['caserma', 2], ['officina', 1], ['torre', 2], ['arcieria', 2]];
 const AI_SHARE = { food: .3, wood: .38, stone: .1, metal: .12, gold: .1 };   // oro più alto da M7: paga le ricerche
 const RES_TILE = { wood: T.TREE, stone: T.STONE, metal: T.METAL, gold: T.GOLD };
 function aiSystem(w) {
@@ -1153,10 +1190,12 @@ function aiThink(team, pls, D) {
   }
   // addestramento: popolani fino alla quota, poi truppe se avanza (riserva per gli edifici)
   // dopo i 3/4 del tempo della prima ondata la CPU mette da parte le risorse per l'Era II
-  const saving = w.era[team] < 2 && w.tick * DT > D.wave0 * .75 && !techQueued(team, 'era2');
-  const rich = cost => RES.every(r => !cost[r] || teamRes(team)[r] >= cost[r] + 60 + (saving ? TECH.era2.cost[r] || 0 : 0));
+  // squadra con umani: le CPU alleate lasciano una riserva più grande e non fanno ricerche (le decide il giocatore)
+  const withHuman = [0, 1, 2].some(k => w.humans[team * 3 + k]);
+  const saving = !withHuman && w.era[team] < 2 && w.tick * DT > D.wave0 * .75 && !techQueued(team, 'era2');
+  const rich = cost => RES.every(r => !cost[r] || teamRes(team)[r] >= cost[r] + (withHuman ? 200 : 60) + (saving ? TECH.era2.cost[r] || 0 : 0));
   // ricerche: l'era appena possibile (solo la CPU capo), le altre se avanzano risorse; una per edificio alla volta
-  for (const e of blds) {
+  if (!withHuman) for (const e of blds) {
     const b = B(e); if (!b.done || b.queue.some(q => techOf(q)) || b.queue.length >= 3) continue;
     const k = techList(b.type, team).find(k => (TECH[k].era || 1) <= w.era[team] && (k === 'era2' ? pls.includes(team * 3) && canPay(team, TECH[k].cost) : rich(TECH[k].cost)) && !techQueued(team, k));
     if (k) Commands.issue({ type: 'research', player: TECH[k].leader ? team * 3 : pls[0], bld: e, tech: k });
@@ -1225,10 +1264,12 @@ const Commands = {
     // villagers: solo popolani del giocatore
     build(w, c) {
       const team = TEAM_OF[c.player], d = BLD[c.bld];
-      if (!d?.key || (d.era || 1) > w.era[team] || !placeOk(c.bld, c.x0, c.z0) || !canPay(team, d.cost)) return;
-      pay(team, d.cost);
-      const b = createBuilding(c.bld, c.player, c.x0, c.z0, false);
-      for (const e of villagers(c)) setOrder(e, { type: 'build', target: b });
+      if (!d?.key || (d.era || 1) > w.era[team]) return;
+      // mura: una linea di segmenti (max 40); i popolani passano da un cantiere al vicino (afterBuild)
+      const cells = d.wall && Array.isArray(c.line) ? c.line.slice(0, 40).filter(q => Array.isArray(q) && Number.isInteger(q[0]) && Number.isInteger(q[1])) : [[c.x0, c.z0]];
+      let first = 0;
+      for (const [x0, z0] of cells) { if (!placeOk(c.bld, x0, z0) || !canPay(team, d.cost)) continue; pay(team, d.cost); const b = createBuilding(c.bld, c.player, x0, z0, false); first ||= b; }
+      if (first) for (const e of villagers(c)) setOrder(e, { type: 'build', target: first });
     },
     construct(w, c) { const b = w.get(c.target, 'Bld'); if (b && TEAM_OF[w.get(c.target, 'Owner').player] === TEAM_OF[c.player]) for (const e of villagers(c)) setOrder(e, { type: 'build', target: c.target }); },
     gather(w, c) {
@@ -1265,6 +1306,90 @@ const Commands = {
   },
   drain(w) { for (const c of this.queue) this.handlers[c.type]?.(w, c); this.queue.length = 0; },
 };
+
+/* ================= AUDIO ================= */
+// Effetti sintetizzati con WebAudio + 3 slot musica per le tracce Suno: vuoti = nessuna musica.
+// Per attivarli: metti i file nel repo (es. music/menu.mp3) e scrivi qui il percorso o un URL https.
+const MUSIC = { menu: '', peace: '', battle: '' };
+const vol = { sfx: +(localStorage.getItem('rts_sfx') ?? .6), music: +(localStorage.getItem('rts_music') ?? .4) };
+let actx = null;
+// [onda, freq. iniziale, freq. finale, durata s, volume]
+const SFX = { click: ['square', 900, 600, .05, .12], hit: ['noise', 0, 0, .07, .3], shot: ['triangle', 900, 300, .1, .15], build: ['sine', 440, 880, .25, .3],
+  train: ['sine', 660, 990, .12, .22], cast: ['sawtooth', 250, 1200, .3, .15], death: ['sawtooth', 260, 60, .3, .2], alarm: ['square', 520, 380, .45, .25] };
+const NOTES = { era: [392, 523, 659, 784], win: [523, 659, 784, 1047, 1319], lose: [392, 330, 262, 196] };
+function tone(type, f0, f1, dur, v, at = 0) {
+  if (!vol.sfx) return;
+  try { actx ||= new AudioContext(); } catch { return; }
+  if (actx.state === 'suspended') actx.resume();
+  const t0 = actx.currentTime + at, g = actx.createGain();
+  g.gain.setValueAtTime(v * vol.sfx, t0); g.gain.exponentialRampToValueAtTime(.001, t0 + dur); g.connect(actx.destination);
+  let src;
+  if (type === 'noise') { const b = actx.createBuffer(1, Math.ceil(actx.sampleRate * dur), actx.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; src = actx.createBufferSource(); src.buffer = b; }
+  else { src = actx.createOscillator(); src.type = type; src.frequency.setValueAtTime(f0, t0); src.frequency.exponentialRampToValueAtTime(f1, t0 + dur); }
+  src.connect(g); src.start(t0); src.stop(t0 + dur);
+}
+const sfxLast = {};
+// con x,z: solo se vicino al centro della camera; massimo uno per tipo ogni 70 ms
+function sfx(k, x, z) {
+  if (x != null && Math.hypot(x - camState.target.x, z - camState.target.z) > camState.zoom * 1.6) return;
+  const now = performance.now(); if (now - (sfxLast[k] || 0) < 70) return; sfxLast[k] = now;
+  if (NOTES[k]) NOTES[k].forEach((f, i) => tone('triangle', f, f, .35, .3, i * .16)); else tone(...SFX[k]);
+}
+const music = { el: null, cur: '', bad: new Set() };
+function playMusic(k) {
+  if (music.cur === k) return; music.cur = k; music.el?.pause(); music.el = null;
+  if (!MUSIC[k] || music.bad.has(k)) return;
+  const a = new Audio(MUSIC[k]); a.loop = true; a.volume = vol.music; a.onerror = () => { music.bad.add(k); if (music.el === a) music.el = null; };
+  a.play().catch(() => {}); music.el = a;   // senza un click il browser blocca l'audio: riparte al primo click
+}
+addEventListener('pointerdown', () => { if (music.el?.paused && vol.music) music.el.play().catch(() => {}); });
+let battleUntil = 0, alarmAt = 0;
+
+/* ================= FOG OF WAR ================= */
+// Solo grafica, per la squadra locale: 0 = mai visto, 1 = esplorato, 2 = visibile ora. La simulazione e l'IA vedono tutto.
+// shortcut: i client ricevono comunque tutte le entità (si nascondono qui); per l'anti-cheat serve filtrare gli snapshot per squadra
+const fog = { vis: null, tex: null, seen: new Set(), cv: document.createElement('canvas'), img: null };
+const fogU = { fogTex: { value: null }, fogOn: { value: 0 } };
+// i materiali illuminati si scuriscono in base alla cella del mondo (funziona anche per alberi e unità alte)
+function fogify(m) {
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, fogU);
+    sh.vertexShader = 'varying vec2 vFogXZ;\n' + sh.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      vec4 fogW = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        fogW = instanceMatrix * fogW;
+      #endif
+      vFogXZ = (modelMatrix * fogW).xz;`);
+    sh.fragmentShader = 'uniform sampler2D fogTex; uniform float fogOn; varying vec2 vFogXZ;\n' + sh.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+      gl_FragColor.rgb *= mix(1.0, texture2D(fogTex, vFogXZ / ${CFG.MAP}.0).r, fogOn);`);
+  };
+  return m;
+}
+function resetFog(M) {
+  fog.vis = new Uint8Array(M * M); fog.seen.clear();
+  fog.tex?.dispose(); fog.tex = new THREE.DataTexture(new Uint8Array(M * M), M, M, THREE.RedFormat);
+  fog.tex.magFilter = fog.tex.minFilter = THREE.LinearFilter; fog.tex.needsUpdate = true; fogU.fogTex.value = fog.tex;
+  fog.cv.width = fog.cv.height = M; fog.img = fog.cv.getContext('2d').createImageData(M, M);
+}
+const visAt = (x, z) => !fogU.fogOn.value || fog.vis[Math.floor(z) * map.M + Math.floor(x)] === 2;
+function updateFog() {
+  const M = map.M, v = fog.vis, team = TEAM_OF[LOCAL_PLAYER];
+  fogU.fogOn.value = world.over == null ? 1 : 0;   // a partita finita si vede tutto
+  for (let i = 0; i < v.length; i++) if (v[i] === 2) v[i] = 1;
+  const stamp = (x, z, r) => { const cx = Math.floor(x), cz = Math.floor(z), r2 = r * r;
+    for (let dz = -r; dz <= r; dz++) { const zz = cz + dz; if (zz < 0 || zz >= M) continue;
+      for (let dx = -r; dx <= r; dx++) { const xx = cx + dx; if (xx >= 0 && xx < M && dx * dx + dz * dz <= r2) v[zz * M + xx] = 2; } } };
+  for (const e of world.query('Unit')) { const pl = world.get(e, 'Owner').player; if (TEAM_OF[pl] !== team) continue;
+    const p = world.get(e, 'Pos'); stamp(p.x, p.z, Math.round(UNITS[world.get(e, 'Unit').type].sight * (heroBonus(pl).speed || 1))); }
+  for (const e of world.query('Bld')) { if (teamOf(e) !== team) continue; const p = world.get(e, 'Pos'), d = BLD[world.get(e, 'Bld').type]; stamp(p.x, p.z, d.tower ? 9 : Math.round(d.size / 2 + 4)); }
+  for (const e of world.query('Bld')) { const p = world.get(e, 'Pos'); if (visAt(p.x, p.z)) fog.seen.add(e); }
+  const d = fog.tex.image.data, im = fog.img.data;
+  for (let i = 0; i < v.length; i++) { d[i] = v[i] === 2 ? 255 : v[i] ? 115 : 0; im[i * 4 + 3] = v[i] === 2 ? 0 : v[i] ? 120 : 255; }
+  fog.tex.needsUpdate = true; fog.cv.getContext('2d').putImageData(fog.img, 0, 0);
+}
+// nemici: unità solo se visibili ora; edifici se visti almeno una volta
+const seeEnt = e => { if (isTeam(e)) return true; if (world.has(e, 'Bld')) return !fogU.fogOn.value || fog.seen.has(e); const p = world.get(e, 'Pos'); return visAt(p.x, p.z); };
 
 /* ================= RENDER ================= */
 const canvas = document.getElementById('view');
@@ -1303,7 +1428,7 @@ function buildMapScene(m) {
     data[o] = base[0] * k; data[o + 1] = base[1] * k; data[o + 2] = base[2] * k; data[o + 3] = 255;
   }
   const tex = new THREE.DataTexture(data, M, M); tex.magFilter = THREE.NearestFilter; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(M, M), new THREE.MeshLambertMaterial({ map: tex }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(M, M), fogify(new THREE.MeshLambertMaterial({ map: tex })));
   ground.rotation.x = -Math.PI / 2; ground.position.set(M / 2, 0, M / 2); mapGroup.add(ground);
 
   const rng = mulberry32(hashSeed(m.seed + ':deco'));
@@ -1315,15 +1440,15 @@ function buildMapScene(m) {
   }
   // alberi e rocce: slot per cella, così si possono togliere (esauriti) e aggiungere (guardaboschi)
   const cap = trees.length + 800;
-  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.08, .12, .6, 5), new THREE.MeshLambertMaterial({ color: 0x5a3d22 }), cap);
-  const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 1.3, 6), new THREE.MeshLambertMaterial({ color: 0x2f6b2a, flatShading: true }), cap);
+  const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(.08, .12, .6, 5), fogify(new THREE.MeshLambertMaterial({ color: 0x5a3d22 })), cap);
+  const crown = new THREE.InstancedMesh(new THREE.ConeGeometry(.45, 1.3, 6), fogify(new THREE.MeshLambertMaterial({ color: 0x2f6b2a, flatShading: true })), cap);
   deco = { trunk, crown, treeSlot: new Int32Array(M * M).fill(-1), rockSlot: new Int32Array(M * M).fill(-1), free: [], used: 0, rng };
   trunk.count = crown.count = cap;
   for (let i = 0; i < cap; i++) setTree(i, 0, 0, 0);
   trees.forEach(([x, z, s]) => { const i = deco.used++; deco.treeSlot[Math.floor(z) * M + Math.floor(x)] = i; setTree(i, x, z, s); });
   for (let i = deco.used; i < cap; i++) deco.free.push(i);
   mapGroup.add(trunk, crown);
-  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.42, 0), new THREE.MeshLambertMaterial({ flatShading: true }), Math.max(1, rocks.length));
+  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(.42, 0), fogify(new THREE.MeshLambertMaterial({ flatShading: true })), Math.max(1, rocks.length));
   const col = new THREE.Color();
   rocks.forEach(([x, z, ty, r], i) => {
     dummy.position.set(x, .2, z); dummy.rotation.set(r * 3, r * 7, r * 5); dummy.scale.set(1, .7 + r * .4, 1); dummy.updateMatrix();
@@ -1370,7 +1495,7 @@ const geo = {
   ring: new THREE.RingGeometry(.5, .6, 24), orb: new THREE.SphereGeometry(.09, 8, 6), crown: new THREE.CylinderGeometry(.13, .11, .1, 6), shield: new THREE.BoxGeometry(.08, .42, .32), bar: new THREE.PlaneGeometry(1, .1), proj: new THREE.BoxGeometry(.05, .05, .5), carry: new THREE.BoxGeometry(.22, .22, .16),
 };
 const matCache = new Map();
-const mat = (color) => { if (!matCache.has(color)) matCache.set(color, new THREE.MeshLambertMaterial({ color, flatShading: true })); return matCache.get(color); };
+const mat = (color) => { if (!matCache.has(color)) matCache.set(color, fogify(new THREE.MeshLambertMaterial({ color, flatShading: true }))); return matCache.get(color); };
 const MAT = { skin: mat(0xe2b48c), wood: mat(0x6b4a2a), steel: mat(0xc9ccd1), horse: mat(0x6e4b2e),
   ring: new THREE.MeshBasicMaterial({ color: 0x9cff9c, side: THREE.DoubleSide, transparent: true, opacity: .9 }),
   ringEnemy: new THREE.MeshBasicMaterial({ color: 0xff7070, side: THREE.DoubleSide, transparent: true, opacity: .9 }),
@@ -1430,7 +1555,9 @@ const waveFlags = [];
 function makeBuildingMesh(type, player) {
   const d = BLD[type], s = d.size, g = new THREE.Group(), body = new THREE.Group(), pc = mat(PLAYER_COLORS[player]);
   const box = (w, h, dd, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), m); o.position.set(x, y, z); body.add(o); return o; };
-  if (d.farm) {
+  if (d.wall) box(.95, 1.1, .95, mat(d.color), 0, .55, 0);
+  else if (d.tower) { box(1.3, 3, 1.3, mat(d.color), 0, 1.5, 0); box(1.8, .4, 1.8, mat(d.color), 0, 3.1, 0); box(.5, .5, .06, pc, 0, 2.4, .66); }
+  else if (d.farm) {
     box(s - .2, .08, s - .2, mat(0x7a5a2c), 0, .04, 0);
     for (let k = 0; k < 4; k++) box(s - .5, .14, .18, mat(0xc9b04a), 0, .1, -s / 2 + .55 + k * (s - 1.1) / 3);
     box(.3, .5, .3, pc, s / 2 - .3, .25, s / 2 - .3);
@@ -1452,21 +1579,30 @@ function makeBuildingMesh(type, player) {
   });
   const ring = new THREE.Mesh(new THREE.RingGeometry(s * .72, s * .72 + .12, 4, 1), TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.ring : MAT.ringEnemy);
   ring.rotation.set(-Math.PI / 2, 0, Math.PI / 4); ring.position.y = .05; ring.visible = false;
-  const bar = new THREE.Group(); bar.position.y = 3.2;
+  const bar = new THREE.Group(); bar.position.y = d.tower ? 4 : d.wall ? 1.6 : 3.2;
   const bg = new THREE.Mesh(geo.bar, MAT.barBg), fg = new THREE.Mesh(geo.bar, MAT.barFg);
   bg.scale.set(s * .6, 1.6, 1); fg.scale.set(s * .6, 1.6, 1); bg.renderOrder = 10; fg.renderOrder = 11; fg.position.z = .001; bar.add(bg, fg); bar.visible = false;
   const scaf = new THREE.Mesh(new THREE.BoxGeometry(s - .2, .15, s - .2), mat(0x8a6a3a)); scaf.position.y = .07;
   g.add(body, ring, bar, scaf); g.userData = { body, ring, bar, fg, scaf, s };
   return g;
 }
+// nostra unità/edificio colpito: musica di battaglia per 20 s; allarme (max ogni 15 s) se fuori schermo
+function hurtAlarm(x, z, time) {
+  battleUntil = time + 20000;
+  if (time - alarmAt > 15000 && Math.hypot(x - camState.target.x, z - camState.target.z) > camState.zoom * 1.6) { alarmAt = time; sfx('alarm'); }
+}
 function syncRender(time, alpha) {
   const seen = new Set();
   const getMesh = (e, make) => { let m = entityMeshes.get(e); if (!m) { m = make(); scene.add(m); entityMeshes.set(e, m); } seen.add(e); return m; };
   for (const e of world.query('Unit', 'Pos')) {
     const u = world.get(e, 'Unit'), p = world.get(e, 'Pos'), pl = world.get(e, 'Owner').player;
-    const m = getMesh(e, () => makeUnitMesh(u.type, pl)), ud = m.userData;
+    const m = getMesh(e, () => { if (world.tick > 40 && isMine(e)) sfx('train'); return makeUnitMesh(u.type, pl); }), ud = m.userData;
+    // suoni ed eventi: colpi, allarme se una nostra unità viene ferita fuori schermo
+    if (u.attackAnim !== ud.lastAtk) { if (ud.lastAtk !== undefined && UNITS[u.type].kind === 'melee' && m.visible && u.order.type === 'attack') sfx('hit', p.x, p.z); ud.lastAtk = u.attackAnim; }
+    if (ud.lastHp !== undefined && u.hp < ud.lastHp && isTeam(e)) hurtAlarm(p.x, p.z, time);
+    ud.lastHp = u.hp; ud.alive = [p.x, p.z, m.visible];
     // invisibile: nascosto ai nemici, lampeggia per la propria squadra
-    m.visible = !u.hid || TEAM_OF[pl] === TEAM_OF[LOCAL_PLAYER]; ud.body.visible = !u.hid || time % 600 < 400;
+    m.visible = (!u.hid || TEAM_OF[pl] === TEAM_OF[LOCAL_PLAYER]) && seeEnt(e); ud.body.visible = !u.hid || time % 600 < 400;
     ud.body.rotation.z = u.stun ? Math.sin(time * .02) * .3 : 0;
     m.position.set(p.px + (p.x - p.px) * alpha, 0, p.pz + (p.z - p.pz) * alpha);
     ud.body.rotation.y = p.face;
@@ -1482,6 +1618,10 @@ function syncRender(time, alpha) {
   for (const e of world.query('Bld')) {
     const b = world.get(e, 'Bld'), p = world.get(e, 'Pos');
     const m = getMesh(e, () => { const g = makeBuildingMesh(b.type, world.get(e, 'Owner').player); g.position.set(p.x, 0, p.z); return g; }), ud = m.userData;
+    m.visible = seeEnt(e);
+    if (ud.lastHp !== undefined && b.hp < ud.lastHp && b.done && isTeam(e)) hurtAlarm(p.x, p.z, time);
+    if (ud.wasDone === false && b.done && isTeam(e)) sfx('build', p.x, p.z);
+    ud.lastHp = b.hp; ud.wasDone = b.done;
     ud.body.scale.y = b.done ? 1 : .1 + b.progress * .9; ud.scaf.visible = !b.done;
     ud.ring.visible = selection.has(e);
     const frac = b.done ? b.hp / (b.max || BLD[b.type].hp) : b.progress;
@@ -1493,14 +1633,16 @@ function syncRender(time, alpha) {
   ghost.visible = !!placing;
   if (placing) {
     const s = BLD[placing.type].size; ghost.scale.set(s, 1, s); ghost.position.set(placing.x0 + s / 2, .5, placing.z0 + s / 2);
+    if (placing.drag) { const L = wallLine(placing), a = L[0], b = L[L.length - 1], x0 = Math.min(a[0], b[0]), z0 = Math.min(a[1], b[1]);
+      ghost.scale.set(Math.abs(b[0] - a[0]) + 1, 1, Math.abs(b[1] - a[1]) + 1); ghost.position.set(x0 + ghost.scale.x / 2, .5, z0 + ghost.scale.z / 2); }
     ghost.material.color.set(placing.ok ? 0x40ff60 : 0xff4040);
   }
   rallyMarker.visible = false;
   if (selection.size === 1) { const se = [...selection][0], b = world.get(se, 'Bld'); if (b?.rally && isTeam(se)) { rallyMarker.visible = true; rallyMarker.position.set(b.rally.x, 0, b.rally.z); } }
   for (const e of world.query('Proj')) {
     const pr = world.get(e, 'Proj');
-    const m = getMesh(e, () => new THREE.Mesh(geo.proj, MAT.proj));
-    m.position.set(pr.px + (pr.x - pr.px) * alpha, .6, pr.pz + (pr.z - pr.pz) * alpha); m.lookAt(pr.tx, .6, pr.tz);
+    const m = getMesh(e, () => { if (visAt(pr.x, pr.z)) sfx('shot', pr.x, pr.z); return new THREE.Mesh(geo.proj, MAT.proj); });
+    m.position.set(pr.px + (pr.x - pr.px) * alpha, .6, pr.pz + (pr.z - pr.pz) * alpha); m.lookAt(pr.tx, .6, pr.tz); m.visible = visAt(pr.x, pr.z);
   }
   for (const e of world.query('Ping', 'Pos')) {
     const o = world.get(e, 'Owner'), p = world.get(e, 'Pos');
@@ -1510,11 +1652,12 @@ function syncRender(time, alpha) {
   }
   for (const e of world.query('Fx', 'Pos')) {
     const f = world.get(e, 'Fx'), p = world.get(e, 'Pos');
-    const m = getMesh(e, () => { const r = new THREE.Mesh(new THREE.RingGeometry(.85, 1, 32), new THREE.MeshBasicMaterial({ color: f.color, transparent: true, side: THREE.DoubleSide }));
+    const m = getMesh(e, () => { if (visAt(p.x, p.z)) sfx('cast', p.x, p.z); const r = new THREE.Mesh(new THREE.RingGeometry(.85, 1, 32), new THREE.MeshBasicMaterial({ color: f.color, transparent: true, side: THREE.DoubleSide }));
       r.rotation.x = -Math.PI / 2; r.position.set(p.x, .06, p.z); r.userData.ping = true; return r; });
+    m.visible = visAt(p.x, p.z);
     const k = Math.min(1, (world.tick - f.born + alpha) / f.max); m.scale.setScalar(f.r * (f.max > 30 ? 1 : .5 + k * .5)); m.material.opacity = f.max > 30 ? .7 : 1 - k;
   }
-  for (const [e, m] of entityMeshes) if (!seen.has(e)) { scene.remove(m); if (m.userData.ping) m.material.dispose(); entityMeshes.delete(e); }
+  for (const [e, m] of entityMeshes) if (!seen.has(e)) { const a = m.userData.alive; if (a?.[2]) sfx('death', a[0], a[1]); scene.remove(m); if (m.userData.ping) m.material.dispose(); entityMeshes.delete(e); }
   for (const f of waveFlags) f.rotation.y = Math.sin(time * .003 + f.userData.wave) * .3;
   // marcatore destinazione
   if (moveMarker.ttl > 0) { moveMarker.ttl--; moveMarker.mesh.visible = true; moveMarker.mesh.scale.setScalar(.4 + moveMarker.ttl / 30); }
@@ -1545,7 +1688,8 @@ const pxToNdc = (x, y) => [(x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1]
 const hex = c => '#' + c.toString(16).padStart(6, '0');
 function drawMinimap() {
   mctx.putImageData(miniBase, 0, 0);
-  for (const e of world.query('Bld')) { const b = world.get(e, 'Bld'), sz = BLD[b.type].size; mctx.fillStyle = hex(PLAYER_COLORS[world.get(e, 'Owner').player]); mctx.fillRect(b.x0, b.z0, sz, sz); }
+  if (fogU.fogOn.value) mctx.drawImage(fog.cv, 0, 0);
+  for (const e of world.query('Bld')) { if (!seeEnt(e)) continue; const b = world.get(e, 'Bld'), sz = BLD[b.type].size; mctx.fillStyle = hex(PLAYER_COLORS[world.get(e, 'Owner').player]); mctx.fillRect(b.x0, b.z0, sz, sz); }
   for (const e of world.query('Unit', 'Pos')) { if (!seeUnit(e)) continue; const p = world.get(e, 'Pos'); mctx.fillStyle = hex(PLAYER_COLORS[world.get(e, 'Owner').player]); mctx.fillRect(p.x - 1, p.z - 1, 2, 2); }
   const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, y]) => screenToGround(x, y));
   mctx.strokeStyle = '#fff'; mctx.lineWidth = 1; mctx.beginPath();
@@ -1576,7 +1720,7 @@ function pickUnit(sx, sy) {
   return best;
 }
 const isMine = e => alive(e) && world.get(e, 'Owner').player === LOCAL_PLAYER;
-const seeUnit = e => !world.get(e, 'Unit').hid || TEAM_OF[world.get(e, 'Owner').player] === TEAM_OF[LOCAL_PLAYER];
+const seeUnit = e => isTeam(e) || (!world.get(e, 'Unit').hid && seeEnt(e));
 const isTeam = e => world.has(e, 'Owner') && TEAM_OF[world.get(e, 'Owner').player] === TEAM_OF[LOCAL_PLAYER];
 function mySelected() { return [...selection].filter(isMine); }
 const uname = ty => ty[0] === '@' ? t('r_' + ty.slice(1)) : UNITS[ty].hero ? heroName(UNITS[ty].hero) : t('u_' + ty);
@@ -1605,6 +1749,12 @@ function startPlacing(type) {
   if (!myVillagers().length || (BLD[type].era || 1) > world.era[TEAM_OF[LOCAL_PLAYER]]) return;
   buildKeys = false; placing = { type, x0: 0, z0: 0, ok: false }; showHint('h_place'); updatePlacing();
 }
+// mura: linea dritta dal punto di partenza, sull'asse più lungo
+function wallLine(pl) {
+  const a = pl.drag ?? { x0: pl.x0, z0: pl.z0 }, dx = pl.x0 - a.x0, dz = pl.z0 - a.z0, n = Math.min(39, Math.max(Math.abs(dx), Math.abs(dz)));
+  const sx = Math.abs(dx) >= Math.abs(dz) ? Math.sign(dx) : 0, sz = sx ? 0 : Math.sign(dz);
+  return Array.from({ length: n + 1 }, (_, i) => [a.x0 + sx * i, a.z0 + sz * i]);
+}
 function stopPlacing() { placing = null; buildKeys = false; showHint(null); }
 function updatePlacing() {
   if (!placing) return;
@@ -1615,6 +1765,7 @@ function updatePlacing() {
 const bldAt = (x, z) => { const M = map.M, cx = Math.floor(x), cz = Math.floor(z); return cx >= 0 && cz >= 0 && cx < M && cz < M ? map.bld[cz * M + cx] : 0; };
 function train(unit) { const b = selBld(); if (b && isTeam(b)) Commands.issue({ type: 'train', player: LOCAL_PLAYER, bld: b, unit }); }
 function issueMoveOrAttack(x, z, target, amove = false) {
+  sfx('click');
   if (!target) { const be = bldAt(x, z); if (be && !isTeam(be)) target = be; }
   const sb = selBld();
   if (sb && isTeam(sb) && BLD[world.get(sb, 'Bld').type].train) { Commands.issue({ type: 'rally', player: LOCAL_PLAYER, bld: sb, x, z }); showMarker(x, z); return; }
@@ -1696,8 +1847,10 @@ canvas.addEventListener('wheel', e => {
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('mousedown', e => {
   if (paused || state !== 'game') return;
+  mouse.x = e.clientX; mouse.y = e.clientY;
   const p = screenToGround(...pxToNdc(e.clientX, e.clientY));
   if (placing) {
+    if (e.button === 0 && BLD[placing.type].wall) { updatePlacing(); placing.drag = { x0: placing.x0, z0: placing.z0 }; return; }   // si conferma al rilascio
     if (e.button === 0) { updatePlacing();
       if (placing.ok) Commands.issue({ type: 'build', player: LOCAL_PLAYER, units: myVillagers(), bld: placing.type, x0: placing.x0, z0: placing.z0 });
       if (!e.shiftKey) stopPlacing(); }
@@ -1716,6 +1869,10 @@ canvas.addEventListener('mousedown', e => {
   }
 });
 addEventListener('mouseup', e => {
+  if (e.button === 0 && placing?.drag) {
+    mouse.x = e.clientX; mouse.y = e.clientY; updatePlacing(); Commands.issue({ type: 'build', player: LOCAL_PLAYER, units: myVillagers(), bld: placing.type, line: wallLine(placing) }); sfx('click');
+    if (e.shiftKey) placing.drag = null; else stopPlacing(); return;
+  }
   if (e.button !== 0 || !drag) return;
   const d = drag; drag = null; $('selbox').classList.add('hidden');
   if (d.box) {
@@ -1725,7 +1882,7 @@ addEventListener('mouseup', e => {
   } else {
     const u = pickUnit(e.clientX, e.clientY);
     if (d.shift && u && isMine(u)) { if (selBld()) selection.clear(); selection.has(u) ? selection.delete(u) : selection.add(u); }
-    else { selection.clear(); const p = screenToGround(...pxToNdc(e.clientX, e.clientY)), b = !u && p && bldAt(p.x, p.z); if (u || b) selection.add(u || b); }
+    else { selection.clear(); const p = screenToGround(...pxToNdc(e.clientX, e.clientY)), b = !u && p && bldAt(p.x, p.z); if (u || (b && seeEnt(b))) selection.add(u || b); }
   }
 });
 canvas.addEventListener('dblclick', e => {
@@ -1767,6 +1924,9 @@ $('btn-start').onclick = () => {
   startGame(net.seed, net.slots.map(Boolean), net.heroes);
 };
 $('btn-resume').onclick = () => setPaused(false);
+$('vsfx').value = vol.sfx; $('vmusic').value = vol.music;
+$('vsfx').oninput = e => { vol.sfx = +e.target.value; localStorage.setItem('rts_sfx', vol.sfx); sfx('click'); };
+$('vmusic').oninput = e => { vol.music = +e.target.value; localStorage.setItem('rts_music', vol.music); if (music.el) music.el.volume = vol.music; };
 $('btn-menu').onclick = $('btn-leave').onclick = () => endGame(null);
 
 function spawnStart(humans) {
@@ -1805,14 +1965,15 @@ function startGame(seed, humans, picks) {
   world.rng = mulberry32(hashSeed(seed + ':sim'));
   world.heroes = pickHeroes(world.humans, picks); world.zones = []; world.graves = [];
   world.era = [1, 1]; world.tech = [[], []];
+  world.stats = [0, 1].map(() => ({ gathered: 0, trained: 0, kills: 0, lost: 0, blds: 0 }));
   selection.clear(); pathQueue.length = 0; for (const k in groups) delete groups[k];
   for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear(); waveFlags.length = 0;
   stopPlacing(); setAmove(false); setAim(null);
-  buildMapScene(map);
+  buildMapScene(map); resetFog(map.M);
   if (net.role !== 'client') spawnStart(humans);   // il client riceve tutto dagli snapshot
   const bb = BASES[TEAM_OF[LOCAL_PLAYER]];
   camState.target.set(bb.x + 6, 0, bb.z + 6); camState.zoom = CFG.ZOOM_START;
-  state = 'game'; acc = 0;
+  state = 'game'; acc = 0; endShown = false; lastEra = 0; $('end').classList.add('hidden');
   $('menu').classList.add('hidden'); $('lobby').classList.add('hidden'); $('hud').classList.remove('hidden');
   setPaused(true);
 }
@@ -1827,7 +1988,8 @@ function updateHud(dt) {
   const s = Math.floor(world.tick * CFG.TICK_MS / 1000);
   $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` + (net.role === 'client' && net.hostPaused ? ' ⏸ ' + t('hostpause') : '');
   const tr = teamRes(TEAM_OF[LOCAL_PLAYER]); for (const r of RES) $('r-' + r).textContent = Math.floor(tr[r]);
-  if (world.over != null && !placing && !amoveMode && aiming == null) showHint(world.over === TEAM_OF[LOCAL_PLAYER] ? 'defeat' : 'victory');
+  if (world.over != null && !endShown) showEnd();
+  const era = world.era[TEAM_OF[LOCAL_PLAYER]]; if (era !== lastEra) { if (lastEra) sfx('era'); lastEra = era; }
   $('r-pop').textContent = `${popOf(LOCAL_PLAYER)}/${popCap(LOCAL_PLAYER)}`;
   $('r-era').textContent = world.era[TEAM_OF[LOCAL_PLAYER]] >= 2 ? 'II' : 'I';
   const hs = world.heroes?.[LOCAL_PLAYER];
@@ -1862,6 +2024,18 @@ function updateHud(dt) {
   if (html !== selKey) { $('selinfo').innerHTML = html; selKey = html; }
   updateCmd(sb);
 }
+let endShown = false, lastEra = 0;
+function showEnd() {
+  endShown = true; const me = TEAM_OF[LOCAL_PLAYER], win = world.over !== me, s = world.stats, sec = Math.floor(world.tick * DT);
+  $('endtitle').textContent = t(win ? 'victory' : 'defeat'); sfx(win ? 'win' : 'lose');
+  const row = (k, a, b) => `<tr><td>${t(k)}</td><td>${a}</td><td>${b}</td></tr>`, hs = world.heroes[LOCAL_PLAYER];
+  $('endstats').innerHTML = `<tr><th>${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}</th><th>${t('you_team')}</th><th>${t('enemy')}</th></tr>` +
+    ['gathered', 'trained', 'kills', 'lost', 'blds'].map(k => row('s_' + k, Math.floor(s[me][k]), Math.floor(s[1 - me][k]))).join('') +
+    `<tr><td>${t('hero')}</td><td>${HEROES[hs.type].icon} ${t('lvl')} ${hs.lvl}</td><td></td></tr>`;
+  $('end').classList.remove('hidden');
+}
+$('btn-watch').onclick = () => $('end').classList.add('hidden');
+$('btn-endmenu').onclick = () => { $('end').classList.add('hidden'); endGame(null); };
 const costTxt = c => Object.entries(c).map(([r, v]) => RES_ICON[r] + v).join(' ');
 const keyName = code => code.replace('Key', '');
 let cmdKey = '';
@@ -2038,6 +2212,7 @@ function netBroadcast() {
   }
   const rm = []; for (const e of net.lastSent.keys()) if (!seen.has(e)) { rm.push(e); net.lastSent.delete(e); }
   const msg = { t: 'snap', tick: world.tick, ch, rm, over: world.over };
+  if (world.over != null) msg.stats = world.stats;
   const rs = JSON.stringify(world.res); if (rs !== net.resKey) { net.resKey = rs; msg.res = world.res; }
   const hk = JSON.stringify(world.heroes); if (hk !== net.heroKey) { net.heroKey = hk; msg.heroes = world.heroes; }
   const tk = JSON.stringify([world.era, world.tech]); if (tk !== net.techKey) { net.techKey = tk; msg.tech = [world.era, world.tech]; }
@@ -2072,7 +2247,7 @@ function applySnap(m) {
     }
   }
   for (const e of m.rm) { if (w.has(e, 'Bld')) unoccupy(e); w.remove(e); selection.delete(e); }
-  w.over = m.over;
+  w.over = m.over; if (m.stats) w.stats = m.stats;
   if (m.res) w.res = m.res;
   if (m.heroes) w.heroes = m.heroes;
   if (m.tech) [w.era, w.tech] = m.tech;
@@ -2086,16 +2261,18 @@ function applySnap(m) {
 }
 
 /* ================= LOOP ================= */
-let acc = 0, last = performance.now();
+let acc = 0, last = performance.now(), fogFrame = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dtMs = Math.min(250, now - last); last = now;
+  playMusic(state === 'game' ? (now < battleUntil ? 'battle' : 'peace') : 'menu');
   if (state !== 'game') return;
   let alpha;
   if (net.role === 'client') alpha = Math.min(1, (now - net.snapT) / (CFG.TICK_MS * SNAP_EVERY));
   else if (!paused) { acc += dtMs; let n = 0; while (acc >= CFG.TICK_MS && n++ < 5) { simStep(); acc -= CFG.TICK_MS; } if (n >= 5) acc = 0; }
   panCamera(dtMs / 1000);
   updateCamera();
+  if (++fogFrame % 6 === 1) updateFog();
   syncRender(now, alpha ?? (paused ? 1 : Math.min(1, acc / CFG.TICK_MS)));
   renderer.render(scene, cam);
   drawMinimap();
@@ -2103,7 +2280,7 @@ function frame(now) {
 }
 
 applyLang(); resize(); requestAnimationFrame(frame);
-window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, HEROES, TECH, st, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); }, navSelfTest };
+window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, HEROES, TECH, st, fog, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); }, navSelfTest };
 // self-check nav (da console in partita): muro temporaneo → percorso lo aggira; cella chiusa → find fallisce subito
 function navSelfTest() {
   const b = BASES[0], x = b.x + 8, z0 = b.z - 4, z1 = b.z + 5, ok = (c, m) => { if (!c) throw new Error('navSelfTest: ' + m); };
