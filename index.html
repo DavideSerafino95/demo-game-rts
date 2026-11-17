@@ -38,7 +38,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
 .ok{color:#7ddc7d}.ko{color:#ef6b6b}
 #lobby{background:radial-gradient(#2a2216,#0c0a07)}
 #slots div{padding:4px 8px;border-left:4px solid;margin:3px 0;background:#0003}
-#chat{position:fixed;left:12px;bottom:170px;width:340px;z-index:5;pointer-events:none;font-size:13px}
+#chat{position:fixed;left:12px;bottom:260px;width:340px;z-index:5;pointer-events:none;font-size:13px}
 #chatlog div{background:#000a;padding:2px 6px;margin-top:2px;border-radius:3px}
 #chatin{width:100%;pointer-events:auto;margin-top:4px}
 #cmd{position:fixed;left:12px;bottom:12px;padding:8px;display:grid;grid-template-columns:repeat(3,92px);gap:6px}
@@ -62,6 +62,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
     <span>🪙 <span data-i18n="gold"></span> <b id="r-gold">0</b></span>
     <span>👥 <span data-i18n="pop"></span> <b id="r-pop">0/100</b></span>
     <span>⏱ <b id="r-time">00:00</b></span>
+    <span>🏛 <b id="r-era">I</b></span>
     <span id="r-hero"></span>
   </div>
   <div id="hint" class="panel hidden"></div>
@@ -109,7 +110,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
       <li data-i18n="k_right"></li><li data-i18n="k_amove"></li><li data-i18n="k_stop"></li><li data-i18n="k_groups"></li>
       <li data-i18n="k_del"></li><li data-i18n="k_pan"></li><li data-i18n="k_zoom"></li><li data-i18n="k_ping"></li>
       <li data-i18n="k_home"></li><li data-i18n="k_mini"></li><li data-i18n="k_esc"></li>
-      <li data-i18n="k_chat"></li><li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li><li data-i18n="k_hero"></li>
+      <li data-i18n="k_chat"></li><li data-i18n="k_build"></li><li data-i18n="k_gather"></li><li data-i18n="k_idle"></li><li data-i18n="k_train"></li><li data-i18n="k_hero"></li><li data-i18n="k_tech"></li>
     </ul>
     <button id="btn-resume" data-i18n="start"></button>
     <button id="btn-menu" data-i18n="toMenu"></button>
@@ -169,6 +170,14 @@ const UNITS = {
   esploratore: { hp: 45, atk: 7, kind: 'melee', armor: [0, 0], range: .6, speed: 3.4, cd: 1, sight: 9, r: .3, cls: 'inf', stealth: true, cost: { food: 50, gold: 25 }, time: 15 },
   guardia:     { hp: 100, atk: 6, kind: 'melee', armor: [3, 4], range: .6, speed: 2.1, cd: 1.4, sight: 6, r: .34, cls: 'spear', cost: { food: 60, metal: 40 }, time: 18 },
   monaco:      { hp: 40, atk: 2, kind: 'melee', armor: [0, 0], range: .6, speed: 2.4, cd: 1.5, sight: 7, r: .3, cls: 'civ', heal: 6, cost: { food: 50, gold: 30 }, time: 16 },
+  // uniche Era II (Sala dell'Eroe in Era II); siege = attacca solo edifici; healAura = PV/s agli alleati entro 3 celle
+  golem:       { hp: 200, atk: 10, kind: 'melee', armor: [2, 5], range: .7, speed: 1.9, cd: 1.6, sight: 6, r: .45, cls: 'inf', cost: { food: 100, stone: 60, gold: 60 }, time: 24 },
+  ranger:      { hp: 55, atk: 8, kind: 'ranged', armor: [1, 1], range: 8, speed: 3.4, cd: 1.5, sight: 10, r: .3, cls: 'arch', cost: { food: 60, wood: 60, gold: 30 }, time: 20 },
+  cavaliere_p: { hp: 150, atk: 13, kind: 'melee', armor: [3, 3], range: .7, speed: 3.6, cd: 1.4, sight: 7, r: .45, cls: 'cav', cost: { food: 100, metal: 80 }, time: 24 },
+  lanciatore:  { hp: 50, atk: 9, kind: 'ranged', armor: [0, 1], range: 4, speed: 3, cd: 1, sight: 8, r: .3, cls: 'arch', cost: { food: 50, metal: 30, gold: 30 }, time: 18 },
+  ariete_c:    { hp: 400, atk: 50, kind: 'melee', armor: [4, 10], range: .8, speed: 1.7, cd: 3, sight: 6, r: .55, cls: 'siege', siege: true, cost: { wood: 250, metal: 120 }, time: 34 },
+  paladino:    { hp: 120, atk: 10, kind: 'melee', armor: [3, 2], range: .7, speed: 2.6, cd: 1.3, sight: 7, r: .34, cls: 'inf', healAura: 2, cost: { food: 80, metal: 50, gold: 40 }, time: 22 },
+  ariete:      { hp: 220, atk: 40, kind: 'melee', armor: [2, 8], range: .8, speed: 1.8, cd: 3, sight: 6, r: .5, cls: 'siege', siege: true, cost: { wood: 200, metal: 80 }, time: 30 },
   // creatura neutrale: xp all'eroe, oro alla squadra che la uccide
   bestia:      { hp: 140, atk: 10, kind: 'melee', armor: [1, 1], range: .7, speed: 3, cd: 1.5, sight: 5, r: .4, cls: 'beast', xp: 60, loot: 30, cost: {}, time: 0 },
 };
@@ -185,7 +194,26 @@ const BLD = {
   arcieria:    { size: 3, hp: 900, cost: { wood: 150 }, time: 30, train: ['arciere'], key: 'KeyR', color: 0xa8916c },
   scuderia:    { size: 3, hp: 900, cost: { wood: 150, stone: 50 }, time: 30, train: ['cavaliere'], key: 'KeyU', color: 0x9b8566 },
   sala:        { size: 3, hp: 900, cost: { wood: 150, stone: 100 }, time: 30, train: 'hero', key: 'KeyE', color: 0xb69ac8 },   // truppa unica del proprio eroe
+  fabbro:      { size: 3, hp: 700, cost: { wood: 150, metal: 50 }, time: 25, key: 'KeyA', color: 0x7d7468 },
+  officina:    { size: 4, hp: 1000, cost: { wood: 200, metal: 100 }, time: 35, train: ['ariete'], era: 2, key: 'KeyO', color: 0x8a6f4d },
 };
+// Ricerche: valgono per tutta la squadra, una volta sola. leader = solo lo slot 0 della squadra (l'host) o la CPU capo.
+// Effetti: gather (+% raccolta), carry (+carico), atk.melee/ranged (+attacco), armor (+armatura), hp (+% PV truppe)
+const TECH = {
+  era2:     { bld: 'cc', cost: { food: 600, stone: 200, gold: 300 }, time: 60, leader: true },
+  carriola: { bld: 'cc', cost: { food: 150, wood: 100, gold: 50 }, time: 30, carry: 5 },
+  aratro:   { bld: 'mulino', cost: { wood: 100, gold: 75 }, time: 30, gather: { food: .15 } },
+  ascia:    { bld: 'segheria', cost: { wood: 100, gold: 75 }, time: 30, gather: { wood: .15 } },
+  piccone:  { bld: 'miniera', cost: { wood: 100, gold: 100 }, time: 35, gather: { stone: .15, metal: .15, gold: .15 } },
+  lame1:    { bld: 'fabbro', cost: { metal: 100, gold: 100 }, time: 40, atk: { melee: 2 } },
+  frecce1:  { bld: 'fabbro', cost: { wood: 100, gold: 100 }, time: 40, atk: { ranged: 1 } },
+  corazza1: { bld: 'fabbro', cost: { metal: 120, gold: 120 }, time: 45, armor: 1 },
+  lame2:    { bld: 'fabbro', era: 2, req: 'lame1', cost: { metal: 200, gold: 200 }, time: 60, atk: { melee: 2 } },
+  frecce2:  { bld: 'fabbro', era: 2, req: 'frecce1', cost: { wood: 200, gold: 200 }, time: 60, atk: { ranged: 1 } },
+  corazza2: { bld: 'fabbro', era: 2, req: 'corazza1', cost: { metal: 220, gold: 220 }, time: 65, armor: 1 },
+  vigore:   { bld: 'caserma', era: 2, cost: { food: 200, gold: 150 }, time: 45, hp: .15 },
+};
+const TECH_KEYS = ['KeyZ', 'KeyX', 'KeyC', 'KeyV'];
 const BUILD_LIST = Object.keys(BLD).filter(k => BLD[k].key);
 const TRAIN_KEYS = ['KeyQ', 'KeyW', 'KeyE'];
 // Contro-tipi: lancieri > cavalleria > arcieri > fanteria > lancieri
@@ -195,7 +223,7 @@ const BONUS = { spear: { cav: 2.5 }, cav: { arch: 2 }, arch: { inf: 1.6 }, inf: 
 // Abilità: tgt = self | point | enemy | ally; run(h, L, x, z, target, team). R (indice 3) dal livello 4.
 // bonus.research (Mago) vale da M7, quando ci saranno le ricerche.
 const HEROES = {
-  mago: { icon: '🧙', name: ['Mago', 'Mage'], unit: 'apprendista', bonus: { research: .8 }, aura: { atk: .1 },
+  mago: { unit2: 'golem', icon: '🧙', name: ['Mago', 'Mage'], unit: 'apprendista', bonus: { research: .8 }, aura: { atk: .1 },
     stats: { hp: 200, atk: 12, kind: 'ranged', armor: [1, 2], range: 6, speed: 2.8, cd: 1.7, sight: 9, splash: 1 },
     ab: [
       { n: ['Palla di fuoco', 'Fireball'], cd: 8, range: 7, tgt: 'point', run: (h, L, x, z, t, tm) => { hurt(h, tm, x, z, 2, 30 + 5 * L); addFx(x, z, 2, 0xff7a2a); } },
@@ -203,7 +231,7 @@ const HEROES = {
       { n: ['Teletrasporto', 'Blink'], cd: 16, range: 8, tgt: 'point', ai: false, run: (h, L, x, z) => blink(h, x, z, 0xb070ff) },
       { n: ['Tempesta arcana', 'Arcane storm'], cd: 60, range: 8, tgt: 'point', run: (h, L, x, z, t, tm) => { addZone(x, z, 5, .5, () => hurt(h, tm, x, z, 3.5, 12 + 2 * L)); addFx(x, z, 3.5, 0xb070ff, 5); } },
     ] },
-  arciere: { icon: '🏹', name: ['Arciere', 'Archer'], unit: 'balestriere', bonus: { range: 1 }, aura: { atk: .1 },
+  arciere: { unit2: 'ranger', icon: '🏹', name: ['Arciere', 'Archer'], unit: 'balestriere', bonus: { range: 1 }, aura: { atk: .1 },
     stats: { hp: 210, atk: 15, kind: 'ranged', armor: [1, 2], range: 7.5, speed: 3, cd: 1.4, sight: 10 },
     ab: [
       { n: ['Tiro mirato', 'Aimed shot'], cd: 8, range: 9, tgt: 'enemy', run: (h, L, x, z, t) => { damage(h, t, 40 + 6 * L); addFx(x, z, .8, 0xffe08a); } },
@@ -212,7 +240,7 @@ const HEROES = {
           addZone(x, z, 30, .1, zn => { const v = unitsIn(x, z, 1.2, foe(tm))[0]; if (v) { fxSet(v, 'stun', 3); damage(h, v, 15 + 2 * L); addFx(x, z, 1.2, 0xffe08a); zn.done = true; } }); } },
       { n: ['Occhio del falco', 'Hawk eye'], cd: 50, tgt: 'self', run: h => { fxSet(h, 'range', 10, 4); fxSet(h, 'atk', 10, .5); } },
     ] },
-  spadaccino: { icon: '⚔️', name: ['Spadaccino', 'Swordsman'], unit: 'spadaccino', bonus: { melee: .15 }, aura: { atk: .1 },
+  spadaccino: { unit2: 'cavaliere_p', icon: '⚔️', name: ['Spadaccino', 'Swordsman'], unit: 'spadaccino', bonus: { melee: .15 }, aura: { atk: .1 },
     stats: { hp: 320, atk: 18, kind: 'melee', armor: [3, 2], range: .7, speed: 3, cd: 1.1, sight: 8 },
     ab: [
       { n: ['Fendente rotante', 'Whirlwind'], cd: 7, tgt: 'self', run: (h, L, x, z, t, tm) => { hurt(h, tm, x, z, 2, 25 + 4 * L); addFx(x, z, 2, 0xe0e0e0); } },
@@ -220,7 +248,7 @@ const HEROES = {
       { n: ['Parata', 'Parry'], cd: 15, tgt: 'self', run: h => fxSet(h, 'dr', 4, .3) },
       { n: ['Lama danzante', 'Dancing blade'], cd: 50, tgt: 'self', run: h => { fxSet(h, 'haste', 8, 2.2); fxSet(h, 'atk', 8, .4); } },
     ] },
-  assassino: { icon: '🗡️', name: ['Assassino', 'Assassin'], unit: 'esploratore', bonus: { speed: 1.2 }, aura: { atk: .1 },
+  assassino: { unit2: 'lanciatore', icon: '🗡️', name: ['Assassino', 'Assassin'], unit: 'esploratore', bonus: { speed: 1.2 }, aura: { atk: .1 },
     stats: { hp: 240, atk: 22, kind: 'melee', armor: [1, 1], range: .6, speed: 3.6, cd: 1.3, sight: 9 },
     ab: [
       { n: ['Invisibilità', 'Invisibility'], cd: 18, tgt: 'self', run: h => fxSet(h, 'invis', 8) },
@@ -230,7 +258,7 @@ const HEROES = {
           addZone(x, z, 5, .25, () => { for (const o of unitsIn(x, z, 3)) teamOf(o) === tm ? fxSet(o, 'invis', .4) : fxSet(o, 'slow', .4, .5); }); } },
       { n: ['Marchio letale', 'Deadly mark'], cd: 45, range: 8, tgt: 'enemy', run: (h, L, x, z, t) => { fxSet(t, 'mark', 8, .6); addFx(x, z, .8, 0xff3030, 8); } },
     ] },
-  tank: { icon: '🛡️', name: ['Tank', 'Tank'], unit: 'guardia', bonus: { bldHp: 1.25 }, aura: { armor: 1 },
+  tank: { unit2: 'ariete_c', icon: '🛡️', name: ['Tank', 'Tank'], unit: 'guardia', bonus: { bldHp: 1.25 }, aura: { armor: 1 },
     stats: { hp: 420, atk: 12, kind: 'melee', armor: [4, 4], range: .7, speed: 2.6, cd: 1.5, sight: 8 },
     ab: [
       { n: ['Provocazione', 'Taunt'], cd: 12, tgt: 'self', run: (h, L, x, z, t, tm) => taunt(h, tm, x, z, 5) },
@@ -239,7 +267,7 @@ const HEROES = {
       { n: ['Colpo stordente', 'Stunning blow'], cd: 10, range: 1.5, tgt: 'enemy', run: (h, L, x, z, t) => { damage(h, t, 15 + 3 * L); fxSet(t, 'stun', 2.5); } },
       { n: ['Fortezza', 'Fortress'], cd: 60, tgt: 'self', run: (h, L, x, z, t, tm) => { fxSet(h, 'dr', 10, .25); heal(h, world.get(h, 'Unit').maxHp * .3); taunt(h, tm, x, z, 6); } },
     ] },
-  curatore: { icon: '✨', name: ['Curatore', 'Healer'], unit: 'monaco', bonus: { regen: 1, food: 1.1 }, aura: { regen: 1 },
+  curatore: { unit2: 'paladino', icon: '✨', name: ['Curatore', 'Healer'], unit: 'monaco', bonus: { regen: 1, food: 1.1 }, aura: { regen: 1 },
     stats: { hp: 220, atk: 8, kind: 'ranged', armor: [1, 2], range: 5, speed: 2.8, cd: 1.6, sight: 9 },
     ab: [
       { n: ['Cura', 'Heal'], cd: 8, range: 7, tgt: 'ally', run: (h, L, x, z, t) => { heal(t, 60 + 10 * L); addFx(x, z, .8, 0x9cff9c); } },
@@ -283,6 +311,11 @@ const STR = {
     hero:'Eroe', lvl:'Liv', respawn:'rinasce tra', k_hero:'Q W E R: abilità eroe (R dal liv. 4) · F: seleziona eroe', h_aim:'Abilità: click sinistro sul bersaglio (Esc annulla)',
     b_sala:'Sala dell\'Eroe', u_apprendista:'Apprendista', u_balestriere:'Balestriere', u_spadaccino:'Spadaccino d\'élite', u_esploratore:'Esploratore furtivo',
     u_guardia:'Guardia con scudo', u_monaco:'Monaco guaritore', u_bestia:'Bestia selvatica',
+    u_golem:'Golem arcano', u_ranger:'Ranger', u_cavaliere_p:'Cavaliere pesante', u_lanciatore:'Lanciatore di coltelli', u_ariete_c:'Ariete corazzato', u_paladino:'Paladino', u_ariete:'Ariete',
+    b_fabbro:'Fabbro', b_officina:'Officina d\'assedio', era:'Era', needera:'Serve l\'Era II', leaderonly:'Solo l\'host', era_a:'⚔ La squadra 1 passa all\'Era II!', era_b:'☠ La squadra 2 passa all\'Era II!',
+    r_era2:'Avanza all\'Era II', r_carriola:'Carriola (+5 carico)', r_aratro:'Aratro (+15% cibo)', r_ascia:'Ascia (+15% legno)', r_piccone:'Piccone (+15% minerali)',
+    r_lame1:'Lame I (+2 mischia)', r_frecce1:'Frecce I (+1 distanza)', r_corazza1:'Corazza I (+1 armatura)', r_lame2:'Lame II (+2 mischia)', r_frecce2:'Frecce II (+1 distanza)', r_corazza2:'Corazza II (+1 armatura)', r_vigore:'Vigore (+15% PV truppe)',
+    k_tech:'Z X C V: ricerche (edificio selezionato)',
     diff:'Difficoltà CPU', easy:'Facile', normal:'Normale', hard:'Difficile', victory:'🏆 Vittoria! Il Centro Città nemico è caduto', defeat:'💀 Sconfitta: il vostro Centro Città è caduto' },
   en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
     seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
@@ -309,6 +342,11 @@ const STR = {
     hero:'Hero', lvl:'Lv', respawn:'respawns in', k_hero:'Q W E R: hero abilities (R from lv 4) · F: select hero', h_aim:'Ability: left click the target (Esc cancels)',
     b_sala:'Hero Hall', u_apprendista:'Apprentice', u_balestriere:'Crossbowman', u_spadaccino:'Elite Swordsman', u_esploratore:'Stealth Scout',
     u_guardia:'Shield Guard', u_monaco:'Healer Monk', u_bestia:'Wild Beast',
+    u_golem:'Arcane Golem', u_ranger:'Ranger', u_cavaliere_p:'Heavy Knight', u_lanciatore:'Knife Thrower', u_ariete_c:'Armored Ram', u_paladino:'Paladin', u_ariete:'Ram',
+    b_fabbro:'Blacksmith', b_officina:'Siege Workshop', era:'Age', needera:'Requires Age II', leaderonly:'Host only', era_a:'⚔ Team 1 advances to Age II!', era_b:'☠ Team 2 advances to Age II!',
+    r_era2:'Advance to Age II', r_carriola:'Wheelbarrow (+5 carry)', r_aratro:'Plow (+15% food)', r_ascia:'Axe (+15% wood)', r_piccone:'Pickaxe (+15% minerals)',
+    r_lame1:'Blades I (+2 melee)', r_frecce1:'Arrows I (+1 ranged)', r_corazza1:'Armor I (+1 armor)', r_lame2:'Blades II (+2 melee)', r_frecce2:'Arrows II (+1 ranged)', r_corazza2:'Armor II (+1 armor)', r_vigore:'Vigor (+15% troop HP)',
+    k_tech:'Z X C V: research (building selected)',
     diff:'CPU difficulty', easy:'Easy', normal:'Normal', hard:'Hard', victory:'🏆 Victory! The enemy Town Center has fallen', defeat:'💀 Defeat: your Town Center has fallen' },
 };
 let lang = localStorage.getItem('rts_lang') || 'it';
@@ -484,7 +522,7 @@ class World {
 let map = null, world = null, nav = null;
 const pathQueue = [];
 function spawnUnit(type, player, x, z) {
-  const e = world.create(), d = UNITS[type], maxHp = d.hero ? d.hp * (1 + .12 * (world.heroes[player].lvl - 1)) : d.hp;
+  const e = world.create(), d = UNITS[type], maxHp = d.hero ? d.hp * (1 + .12 * (world.heroes[player].lvl - 1)) : d.hp * (troop(d) ? 1 + tfx(TEAM_OF[player]).hp : 1);
   world.add(e, 'Pos', { x, z, px: x, pz: z, face: 0 });
   world.add(e, 'Owner', { player });
   world.add(e, 'Unit', { type, hp: maxHp, maxHp, cd: 0, order: { type: 'idle' }, path: null, pathPending: false, pathTick: -99, home: { x, z } });
@@ -494,15 +532,26 @@ function spawnUnit(type, player, x, z) {
 const fxOn = (u, k) => { const f = u.fx?.[k]; return f && f[0] > world.tick ? f[1] : 0; };
 const fxSet = (e, k, sec, v = 1) => { const u = world.get(e, 'Unit'); if (u) (u.fx ||= {})[k] = [world.tick + Math.round(sec / DT), v]; };
 const heroBonus = pl => HEROES[world.heroes?.[pl]?.type]?.bonus ?? {};
+const troop = d => !d.hero && d.cls !== 'civ' && d.cls !== 'beast';   // le ricerche militari valgono per le truppe
+// somma degli effetti delle ricerche completate dalla squadra (ricalcolata solo quando cambia la lista)
+function tfx(team) {
+  const list = world.tech?.[team] ?? [], key = list.join();
+  if (world.tfxKey?.[team] === key) return world.tfxC[team];
+  const f = { melee: 0, ranged: 0, armor: 0, carry: 0, hp: 0, gather: {} };
+  for (const k of list) { const t = TECH[k]; f.melee += t.atk?.melee || 0; f.ranged += t.atk?.ranged || 0; f.armor += t.armor || 0; f.carry += t.carry || 0; f.hp += t.hp || 0;
+    for (const r in t.gather) f.gather[r] = (f.gather[r] || 0) + t.gather[r]; }
+  (world.tfxKey ||= [])[team] = key; (world.tfxC ||= [])[team] = f; return f;
+}
 // statistiche effettive: livello eroe, bonus del giocatore, aura, effetti
 function st(e) {
   const u = world.get(e, 'Unit'), d = UNITS[u.type], pl = world.get(e, 'Owner').player, bo = heroBonus(pl), au = u.aura ?? {};
-  const lv = d.hero ? world.heroes[pl].lvl - 1 : 0, ranged = d.kind === 'ranged';
+  const lv = d.hero ? world.heroes[pl].lvl - 1 : 0, ranged = d.kind === 'ranged', tf = troop(d) ? tfx(TEAM_OF[pl]) : { melee: 0, ranged: 0, armor: 0 };
+  const armor = (au.armor || 0) + tf.armor;
   return { ...d,
-    atk: d.atk * (1 + lv * .1) * (1 + (ranged ? 0 : bo.melee || 0) + (au.atk || 0) + fxOn(u, 'atk')),
+    atk: (d.atk + (ranged ? tf.ranged : tf.melee)) * (1 + lv * .1) * (1 + (ranged ? 0 : bo.melee || 0) + (au.atk || 0) + fxOn(u, 'atk')),
     range: d.range + (ranged && !d.hero ? bo.range || 0 : 0) + fxOn(u, 'range'),
     speed: d.speed * (bo.speed || 1) * (fxOn(u, 'slow') || 1), sight: d.sight * (bo.speed || 1),
-    cd: d.cd / (fxOn(u, 'haste') || 1), armor: au.armor ? d.armor.map(a => a + au.armor) : d.armor };
+    cd: d.cd / (fxOn(u, 'haste') || 1), armor: armor ? d.armor.map(a => a + armor) : d.armor };
 }
 function unitsIn(x, z, r, pred = () => true) {
   const out = [];
@@ -560,9 +609,9 @@ function* near(x, z, r) {
   for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) { const a = spatial.get((gx << 8) | gz); if (a) yield* a; }
 }
 // unità nemica più vicina; con blds, se non ce ne sono, anche edifici nemici
-function findEnemy(e, r, blds) {
+function findEnemy(e, r, blds, onlyBld) {
   const p = world.get(e, 'Pos'), tm = teamOf(e); let best = null, bd = r;
-  for (const o of near(p.x, p.z, r)) { if (o === e || !alive(o) || teamOf(o) === tm || world.get(o, 'Unit').hid) continue;
+  if (!onlyBld) for (const o of near(p.x, p.z, r)) { if (o === e || !alive(o) || teamOf(o) === tm || world.get(o, 'Unit').hid) continue;
     const q = world.get(o, 'Pos'), d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = o; } }
   if (best || !blds) return best;
   for (const o of world.query('Bld')) { if (teamOf(o) === tm) continue;
@@ -588,7 +637,7 @@ function damage(attacker, target, dmgBase) {
   tu.hp -= Math.max(1, dmgBase - (ad?.pierce ? 0 : td.armor[kind])) * mult;
   tu.lastHit = world.tick;
   // reazione: se inattivo, risponde
-  if (tu.order.type === 'idle' && ad) tu.order = { type: 'attack', target: attacker, auto: true };
+  if (tu.order.type === 'idle' && ad && !td.siege) tu.order = { type: 'attack', target: attacker, auto: true };   // gli arieti non rispondono alle unità
   if (tu.hp <= 0) killUnit(target, attacker);
 }
 function killUnit(e, killer) {
@@ -662,8 +711,8 @@ function unitSystem(w) {
     }
     // acquisizione automatica bersagli
     const onBld = o.type === 'attack' && w.has(o.target, 'Bld');   // mentre colpisce un edificio, reagisce alle unità
-    if (!d.heal && !fxOn(u, 'invis') && (o.type === 'idle' || o.type === 'amove' || onBld) && (w.tick + e) % 5 === 0) {   // invisibile: attacca solo su ordine
-      const tg = findEnemy(e, d.sight, o.type === 'amove');
+    if (!d.heal && !fxOn(u, 'invis') && (o.type === 'idle' || o.type === 'amove' || (onBld && !d.siege)) && (w.tick + e) % 5 === 0) {   // invisibile: attacca solo su ordine
+      const tg = findEnemy(e, d.sight, o.type === 'amove' || !!d.siege, d.siege);   // arieti: solo edifici
       if (tg) {
         if (o.type === 'amove') u.order = { type: 'attack', target: tg, resume: { x: o.x, z: o.z, vmax: o.vmax } };
         else if (onBld) u.order = { type: 'attack', target: tg, resume: o.resume ?? { x: p.x, z: p.z } };
@@ -834,7 +883,7 @@ function gatherStep(e, u, p, d, o) {
   if (u.pathFailed) { u.pathFailed = false; return toIdle(u); }
   const comp = nav.compAt(p.x, p.z);   // solo celle raggiungibili da qui
   if (u.carry && u.carryRes !== o.res) u.carry = 0;     // cambio risorsa: si perde il carico (come AoE)
-  if (u.carry >= CFG.CARRY) { u.order = { type: 'return', back: o }; u.path = null; return; }
+  if (u.carry >= CFG.CARRY + tfx(teamOf(e)).carry) { u.order = { type: 'return', back: o }; u.path = null; return; }
   let rect;
   if (o.farm) {
     const f = world.get(o.farm, 'Bld');
@@ -858,7 +907,7 @@ function gatherStep(e, u, p, d, o) {
   }
   u.path = null; p.face = Math.atan2((rect.x0 + rect.x1) / 2 - p.x, (rect.z0 + rect.z1) / 2 - p.z);
   if (world.tick % 10 === 0) u.attackAnim = world.tick;
-  u.gatherT = (u.gatherT || 0) + GATHER_RATE[o.res] * DT;
+  u.gatherT = (u.gatherT || 0) + GATHER_RATE[o.res] * (1 + (tfx(teamOf(e)).gather[o.res] || 0)) * DT;
   while (u.gatherT >= 1) {
     u.gatherT--; u.carry = (u.carry || 0) + 1; u.carryRes = o.res;
     if (!o.farm && --map.amount[o.cell] <= 0) { depleteCell(o.cell); break; }
@@ -911,8 +960,21 @@ function spawnFrom(be, type, player) {
   else setOrder(u, { type: 'move', x: b.rally.x, z: b.rally.z });
   return u;
 }
-// unità addestrabili: la Sala dell'Eroe offre la truppa unica dell'eroe di chi addestra
-const trainList = (type, pl) => BLD[type].train === 'hero' ? [HEROES[world.heroes[pl]?.type]?.unit].filter(Boolean) : BLD[type].train;
+// unità addestrabili: la Sala dell'Eroe offre le truppe uniche dell'eroe di chi addestra (la seconda dall'Era II)
+const trainList = (type, pl) => { if (BLD[type].train !== 'hero') return BLD[type].train; const h = HEROES[world.heroes[pl]?.type];
+  return h ? [h.unit, world.era[TEAM_OF[pl]] >= 2 && h.unit2].filter(Boolean) : []; };
+// ricerche in coda: voce { unit: '@nome' } nella stessa coda delle unità (stesso formato di rete)
+const techOf = q => q.unit[0] === '@' ? q.unit.slice(1) : null;
+const qTime = q => { const tk = techOf(q); return tk ? TECH[tk].time * (heroBonus(q.player).research || 1) : UNITS[q.unit].time; };
+const qCost = q => { const tk = techOf(q); return tk ? TECH[tk].cost : UNITS[q.unit].cost; };
+const techQueued = (team, k) => [...world.query('Bld')].some(e => teamOf(e) === team && world.get(e, 'Bld').queue.some(q => q.unit === '@' + k));
+// ricerche disponibili per l'edificio: non fatte, non in coda, requisiti ok (l'era si controlla a parte per mostrarla grigia)
+const techList = (type, team) => Object.keys(TECH).filter(k => TECH[k].bld === type && !world.tech[team].includes(k) && (!TECH[k].req || world.tech[team].includes(TECH[k].req)) && !(k === 'era2' && world.era[team] >= 2));
+function finishTech(team, k) {
+  world.tech[team].push(k);
+  if (k === 'era2') { world.era[team] = 2; sysChat(t(team ? 'era_b' : 'era_a')); }
+  if (TECH[k].hp) for (const e of world.query('Unit')) { const u = world.get(e, 'Unit'); if (teamOf(e) === team && troop(UNITS[u.type])) { u.maxHp *= 1 + TECH[k].hp; u.hp *= 1 + TECH[k].hp; } }
+}
 function heroSystem(w) {
   // respawn al CC della squadra
   w.heroes.forEach((hs, pl) => {
@@ -934,6 +996,8 @@ function heroSystem(w) {
     const u = w.get(e, 'Unit'), pl = w.get(e, 'Owner').player;
     const r = (UNITS[u.type].hero ? u.maxHp * .01 : 0) + (u.aura?.regen || 0) + (heroBonus(pl).regen && w.tick - (u.lastHit ?? -1e9) > 100 ? heroBonus(pl).regen : 0);
     if (r && u.hp < u.maxHp) heal(e, r);
+    const ha = UNITS[u.type].healAura;
+    if (ha) { const p = w.get(e, 'Pos'), tm = teamOf(e); for (const o of unitsIn(p.x, p.z, 3, o => teamOf(o) === tm)) heal(o, ha); }
   }
   w.graves = w.graves.filter(g => w.tick - g.tick < 600);   // resurrezione: morti degli ultimi 30 s
 }
@@ -945,9 +1009,11 @@ function buildingSystem(w) {
     // produzione
     const q = b.queue[0];
     if (q) {
-      q.t = Math.min(UNITS[q.unit].time, q.t + DT);
-      q.blocked = q.t >= UNITS[q.unit].time && popOf(q.player) >= popCap(q.player);
-      if (q.t >= UNITS[q.unit].time && !q.blocked) { b.queue.shift(); spawnFrom(e, q.unit, q.player); }
+      const tk = techOf(q), T0 = qTime(q);
+      q.t = Math.min(T0, q.t + DT);
+      q.blocked = !tk && q.t >= T0 && popOf(q.player) >= popCap(q.player);
+      if (q.t >= T0 && !q.blocked) { b.queue.shift(); if (tk) finishTech(TEAM_OF[q.player], tk); else spawnFrom(e, q.unit, q.player); }
+      else if (q.blocked && b.queue.some(o => !o.blocked && o !== q)) b.queue.push(b.queue.shift());   // unità ferma per popolazione: passa avanti il resto (es. ricerche)
     }
     // guardaboschi: pianta alberelli nel raggio
     if (d.forest && (b.forestT += DT) >= CFG.FOREST_EVERY) {
@@ -982,8 +1048,8 @@ const DIFF = {
   normal: { mult: 1,   think: 20, vil: 14, wave0: 360, waveN: 6 },
   hard:   { mult: 1.25, think: 10, vil: 18, wave0: 240, waveN: 6 },
 };
-const AI_PLAN = [['segheria', 1], ['caserma', 1], ['miniera', 1], ['arcieria', 1], ['sala', 1], ['guardaboschi', 1], ['scuderia', 1], ['caserma', 2], ['arcieria', 2]];
-const AI_SHARE = { food: .32, wood: .4, stone: .1, metal: .12, gold: .06 };
+const AI_PLAN = [['segheria', 1], ['caserma', 1], ['miniera', 1], ['arcieria', 1], ['sala', 1], ['fabbro', 1], ['guardaboschi', 1], ['mulino', 1], ['scuderia', 1], ['caserma', 2], ['officina', 1], ['arcieria', 2]];
+const AI_SHARE = { food: .3, wood: .38, stone: .1, metal: .12, gold: .1 };   // oro più alto da M7: paga le ricerche
 const RES_TILE = { wood: T.TREE, stone: T.STONE, metal: T.METAL, gold: T.GOLD };
 function aiSystem(w) {
   const D = DIFF[w.diff];
@@ -1064,7 +1130,7 @@ function aiThink(team, pls, D) {
     if (v) Commands.issue({ type: 'construct', player: owner(v), units: [v], target: e });
   }
   // piano edifici, uno alla volta (conta anche quelli dei compagni umani)
-  const next = AI_PLAN.find(([ty, n]) => count(ty) < n);
+  const next = AI_PLAN.find(([ty, n]) => count(ty) < n && (BLD[ty].era || 1) <= w.era[team]);
   if (!busy && next && canPay(team, BLD[next[0]].cost)) busy = aiBuild(team, pls[ai.turn++ % pls.length], next[0], vil);
   // popolani inattivi → la risorsa più scoperta rispetto alle quote
   const gath = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0 };
@@ -1086,7 +1152,15 @@ function aiThink(team, pls, D) {
     }
   }
   // addestramento: popolani fino alla quota, poi truppe se avanza (riserva per gli edifici)
-  const rich = cost => RES.every(r => !cost[r] || teamRes(team)[r] >= cost[r] + 60);
+  // dopo i 3/4 del tempo della prima ondata la CPU mette da parte le risorse per l'Era II
+  const saving = w.era[team] < 2 && w.tick * DT > D.wave0 * .75 && !techQueued(team, 'era2');
+  const rich = cost => RES.every(r => !cost[r] || teamRes(team)[r] >= cost[r] + 60 + (saving ? TECH.era2.cost[r] || 0 : 0));
+  // ricerche: l'era appena possibile (solo la CPU capo), le altre se avanzano risorse; una per edificio alla volta
+  for (const e of blds) {
+    const b = B(e); if (!b.done || b.queue.some(q => techOf(q)) || b.queue.length >= 3) continue;
+    const k = techList(b.type, team).find(k => (TECH[k].era || 1) <= w.era[team] && (k === 'era2' ? pls.includes(team * 3) && canPay(team, TECH[k].cost) : rich(TECH[k].cost)) && !techQueued(team, k));
+    if (k) Commands.issue({ type: 'research', player: TECH[k].leader ? team * 3 : pls[0], bld: e, tech: k });
+  }
   for (const pl of pls)
     if (vil.filter(e => owner(e) === pl).length < D.vil && !B(cc).queue.some(q => q.player === pl) && canPay(team, UNITS.popolano.cost))
       Commands.issue({ type: 'train', player: pl, bld: cc, unit: 'popolano' });
@@ -1145,13 +1219,13 @@ const Commands = {
       const vmax = us.length > 1 ? Math.min(...us.map(e => UNITS[w.get(e, 'Unit').type].speed)) : undefined;
       for (const [e, x, z] of formation(us, c.x, c.z)) setOrder(e, { type: c.amove ? 'amove' : 'move', x, z, vmax });
     },
-    attack(w, c) { if (!hittable(c.target)) return; for (const e of owned(c)) setOrder(e, { type: 'attack', target: c.target }); },
+    attack(w, c) { if (!hittable(c.target)) return; for (const e of owned(c)) if (!UNITS[w.get(e, 'Unit').type].siege || w.has(c.target, 'Bld')) setOrder(e, { type: 'attack', target: c.target }); },
     stop(w, c) { for (const e of owned(c)) setOrder(e, { type: 'idle' }); },
     kill(w, c) { for (const e of owned(c)) killUnit(e); },
     // villagers: solo popolani del giocatore
     build(w, c) {
       const team = TEAM_OF[c.player], d = BLD[c.bld];
-      if (!d?.key || !placeOk(c.bld, c.x0, c.z0) || !canPay(team, d.cost)) return;
+      if (!d?.key || (d.era || 1) > w.era[team] || !placeOk(c.bld, c.x0, c.z0) || !canPay(team, d.cost)) return;
       pay(team, d.cost);
       const b = createBuilding(c.bld, c.player, c.x0, c.z0, false);
       for (const e of villagers(c)) setOrder(e, { type: 'build', target: b });
@@ -1172,7 +1246,13 @@ const Commands = {
     },
     cancel(w, c) {
       const b = w.get(c.bld, 'Bld'), q = b?.queue[c.i]; if (!q || q.player !== c.player) return;
-      b.queue.splice(c.i, 1); pay(TEAM_OF[c.player], UNITS[q.unit].cost, -1);
+      b.queue.splice(c.i, 1); pay(TEAM_OF[c.player], qCost(q), -1);
+    },
+    research(w, c) {
+      const b = w.get(c.bld, 'Bld'), team = TEAM_OF[c.player], T0 = TECH[c.tech];
+      if (!T0 || !b?.done || teamOf(c.bld) !== team || !techList(b.type, team).includes(c.tech) || techQueued(team, c.tech)) return;
+      if ((T0.era || 1) > w.era[team] || (T0.leader && c.player !== team * 3) || b.queue.length >= 5 || !canPay(team, T0.cost)) return;
+      pay(team, T0.cost); b.queue.push({ unit: '@' + c.tech, player: c.player, t: 0 });
     },
     ability(w, c) {
       const hs = w.heroes[c.player], e = hs?.e; if (!alive(e)) return;
@@ -1297,7 +1377,8 @@ const MAT = { skin: mat(0xe2b48c), wood: mat(0x6b4a2a), steel: mat(0xc9ccd1), ho
   barBg: new THREE.MeshBasicMaterial({ color: 0x220000, depthTest: false }), barFg: new THREE.MeshBasicMaterial({ color: 0x3ee05a, depthTest: false }),
   barFgE: new THREE.MeshBasicMaterial({ color: 0xff4040, depthTest: false }), proj: mat(0xf0e0b0), gold: mat(0xffd84a), beast: mat(0x5a5048) };
 // modello base per le truppe uniche (+ un accessorio)
-const LOOK = { apprendista: 'arciere', balestriere: 'arciere', spadaccino: 'fante', esploratore: 'popolano', guardia: 'fante', monaco: 'popolano' };
+const LOOK = { apprendista: 'arciere', balestriere: 'arciere', spadaccino: 'fante', esploratore: 'popolano', guardia: 'fante', monaco: 'popolano',
+  golem: 'fante', ranger: 'arciere', cavaliere_p: 'cavaliere', lanciatore: 'arciere', paladino: 'fante' };
 const HERO_GEAR = { mago: 'staff', arciere: 'bow', spadaccino: 'blade', assassino: 'blade', tank: 'shield', curatore: 'staff' };
 function makeUnitMesh(type, player) {
   const g = new THREE.Group(), body = new THREE.Group(), c = mat(PLAYER_COLORS[player]);
@@ -1309,27 +1390,35 @@ function makeUnitMesh(type, player) {
   if (hero) {
     add(geo.body, c, 0, .34, 0).scale.setScalar(1.25); add(geo.head, MAT.skin, 0, .8, 0); add(geo.crown, MAT.gold, 0, .96, 0);
     gear[HERO_GEAR[hero]](); if (hero === 'assassino') add(geo.blade, MAT.steel, -.27, .45, .1, -.4); if (hero === 'tank') gear.blade();
+  } else if (UNITS[type].siege) {   // ariete: carro di legno con tetto e tronco davanti
+    add(new THREE.BoxGeometry(.7, .35, 1.1), MAT.wood, 0, .3, 0); add(new THREE.ConeGeometry(.55, .45, 4), c, 0, .7, 0).rotation.y = Math.PI / 4;
+    add(geo.stick, MAT.wood, 0, .35, .4, Math.PI / 2).scale.set(4, .7, 4);
+    if (type === 'ariete_c') add(new THREE.BoxGeometry(.75, .08, 1.15), MAT.steel, 0, .5, 0);
   } else if (type === 'bestia') {
     add(geo.horse, MAT.beast, 0, .3, 0).scale.set(1.3, 1, 1); add(geo.box, MAT.beast, 0, .45, .5).scale.setScalar(.7);
-  } else if (type === 'cavaliere') {
+  } else if (look === 'cavaliere') {
     add(geo.horse, MAT.horse, 0, .35, 0); add(geo.body, c, 0, .8, -.05).scale.setScalar(.8); add(geo.head, MAT.skin, 0, 1.12, -.05);
     add(geo.stick, MAT.wood, .2, .9, .3, Math.PI / 2.4);
+    if (type === 'cavaliere_p') { add(geo.horse, MAT.steel, 0, .42, 0).scale.set(1.05, .4, 1.02); gear.shield(); }
   } else {
     if (look === 'fante') add(geo.box, c, 0, .3, 0); else if (look === 'arciere') add(geo.cone, c, 0, .3, 0); else add(geo.body, c, 0, .28, 0);
     add(geo.head, MAT.skin, 0, .68, 0);
     if (look === 'fante') gear.blade();
     if (type === 'lanciere') add(geo.stick, MAT.wood, .24, .6, .05, .15);
-    if (look === 'arciere' && type !== 'apprendista') gear.bow();
+    if (look === 'arciere' && type !== 'apprendista' && type !== 'lanciatore') gear.bow();
     if (type === 'apprendista' || type === 'monaco') gear.staff();
     if (type === 'guardia') gear.shield();
     if (type === 'popolano') body.scale.setScalar(.85);
     if (type === 'spadaccino') body.scale.setScalar(1.1);
+    if (type === 'golem') { body.scale.setScalar(1.5); add(geo.orb, mat(0xb070ff), 0, .45, .17); }
+    if (type === 'lanciatore') { gear.blade(); add(geo.blade, MAT.steel, -.27, .45, .1, -.4); }
+    if (type === 'paladino') { gear.blade(); gear.shield(); add(geo.crown, MAT.gold, 0, .82, 0).scale.setScalar(.7); }
   }
   if (type === 'popolano') { const cb = new THREE.Mesh(geo.carry, MAT.skin); cb.position.set(0, .45, -.25); cb.visible = false; body.add(cb); g.userData.carry = cb; }
   const ring = new THREE.Mesh(geo.ring, TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.ring : MAT.ringEnemy);
   ring.rotation.x = -Math.PI / 2; ring.position.y = .03; ring.visible = false; ring.scale.setScalar(UNITS[type].r / .32);
   if (hero) { const hr = new THREE.Mesh(geo.ring, MAT.gold); hr.rotation.x = -Math.PI / 2; hr.position.y = .02; hr.scale.setScalar(.75); g.add(hr); }
-  const bar = new THREE.Group(); bar.position.y = type === 'cavaliere' ? 1.55 : hero ? 1.35 : 1.05;
+  const bar = new THREE.Group(); bar.position.y = look === 'cavaliere' ? 1.55 : hero || type === 'golem' ? 1.35 : 1.05;
   const bg = new THREE.Mesh(geo.bar, MAT.barBg), fg = new THREE.Mesh(geo.bar, TEAM_OF[player] === TEAM_OF[LOCAL_PLAYER] ? MAT.barFg : MAT.barFgE);
   bg.scale.x = .8; fg.scale.x = .8; bg.renderOrder = 10; fg.renderOrder = 11; fg.position.z = .001; bar.add(bg, fg); bar.visible = false;
   g.add(body, ring, bar); Object.assign(g.userData, { body, ring, bar, fg });
@@ -1490,7 +1579,10 @@ const isMine = e => alive(e) && world.get(e, 'Owner').player === LOCAL_PLAYER;
 const seeUnit = e => !world.get(e, 'Unit').hid || TEAM_OF[world.get(e, 'Owner').player] === TEAM_OF[LOCAL_PLAYER];
 const isTeam = e => world.has(e, 'Owner') && TEAM_OF[world.get(e, 'Owner').player] === TEAM_OF[LOCAL_PLAYER];
 function mySelected() { return [...selection].filter(isMine); }
-const uname = ty => UNITS[ty].hero ? heroName(UNITS[ty].hero) : t('u_' + ty);
+const uname = ty => ty[0] === '@' ? t('r_' + ty.slice(1)) : UNITS[ty].hero ? heroName(UNITS[ty].hero) : t('u_' + ty);
+function research(k) { const b = selBld(); if (b && isTeam(b)) Commands.issue({ type: 'research', player: LOCAL_PLAYER, bld: b, tech: k }); }
+// ricerca bloccata: motivo da mostrare (null = si può)
+const techWhy = (k, team) => (TECH[k].era || 1) > world.era[team] ? 'needera' : TECH[k].leader && LOCAL_PLAYER !== team * 3 ? 'leaderonly' : techQueued(team, k) ? 'queue' : null;
 const myHero = () => mySelected().find(e => UNITS[world.get(e, 'Unit').type].hero);
 let aiming = null;   // indice abilità in attesa del bersaglio
 function setAim(i) { aiming = i; document.body.classList.toggle('amove', i != null); showHint(i != null ? 'h_aim' : null); }
@@ -1510,7 +1602,7 @@ function showHint(k) { $('hint').textContent = k ? t(k) : ''; $('hint').classLis
 function setAmove(v) { amoveMode = v; document.body.classList.toggle('amove', v); showHint(v ? 'h_amove' : null); }
 let placing = null, buildKeys = false;
 function startPlacing(type) {
-  if (!myVillagers().length) return;
+  if (!myVillagers().length || (BLD[type].era || 1) > world.era[TEAM_OF[LOCAL_PLAYER]]) return;
   buildKeys = false; placing = { type, x0: 0, z0: 0, ok: false }; showHint('h_place'); updatePlacing();
 }
 function stopPlacing() { placing = null; buildKeys = false; showHint(null); }
@@ -1560,7 +1652,8 @@ addEventListener('keydown', e => {
   if (paused) return;
   if (buildKeys) { const ty = BUILD_LIST.find(k => BLD[k].key === e.code); if (ty) startPlacing(ty); else stopPlacing(); return; }
   if (e.code === 'KeyB' && myVillagers().length) { buildKeys = true; placing = null; showHint('h_build'); return; }
-  const sb = selBld(), ti = TRAIN_KEYS.indexOf(e.code), ai = ABIL_KEYS.indexOf(e.code);
+  const sb = selBld(), ti = TRAIN_KEYS.indexOf(e.code), ai = ABIL_KEYS.indexOf(e.code), ri = TECH_KEYS.indexOf(e.code);
+  if (sb && ri >= 0 && isTeam(sb)) { const k = techList(world.get(sb, 'Bld').type, TEAM_OF[LOCAL_PLAYER])[ri]; if (k) research(k); return; }
   if (sb && ti >= 0) { const list = trainList(world.get(sb, 'Bld').type, LOCAL_PLAYER); if (list?.[ti]) train(list[ti]); return; }
   if (!sb && ai >= 0 && myHero()) { castKey(ai); return; }
   if (e.code === 'KeyF') { const h = world.heroes[LOCAL_PLAYER]?.e; if (alive(h)) { const p = world.get(h, 'Pos'); selection.clear(); selection.add(h); camState.target.set(p.x, 0, p.z); } }
@@ -1711,6 +1804,7 @@ function startGame(seed, humans, picks) {
   world.res = [0, 1].map(() => ({ ...CFG.START_RES }));
   world.rng = mulberry32(hashSeed(seed + ':sim'));
   world.heroes = pickHeroes(world.humans, picks); world.zones = []; world.graves = [];
+  world.era = [1, 1]; world.tech = [[], []];
   selection.clear(); pathQueue.length = 0; for (const k in groups) delete groups[k];
   for (const [, m] of entityMeshes) scene.remove(m); entityMeshes.clear(); waveFlags.length = 0;
   stopPlacing(); setAmove(false); setAim(null);
@@ -1735,6 +1829,7 @@ function updateHud(dt) {
   const tr = teamRes(TEAM_OF[LOCAL_PLAYER]); for (const r of RES) $('r-' + r).textContent = Math.floor(tr[r]);
   if (world.over != null && !placing && !amoveMode && aiming == null) showHint(world.over === TEAM_OF[LOCAL_PLAYER] ? 'defeat' : 'victory');
   $('r-pop').textContent = `${popOf(LOCAL_PLAYER)}/${popCap(LOCAL_PLAYER)}`;
+  $('r-era').textContent = world.era[TEAM_OF[LOCAL_PLAYER]] >= 2 ? 'II' : 'I';
   const hs = world.heroes?.[LOCAL_PLAYER];
   if (hs) $('r-hero').textContent = `${HEROES[hs.type].icon} ${t('lvl')} ${hs.lvl}` + (hs.e ? '' : ` · ${t('respawn')} ${Math.max(0, Math.ceil((hs.respawn - world.tick) * DT))}s`);
   const p = screenToGround(...pxToNdc(mouse.x, mouse.y));
@@ -1773,16 +1868,20 @@ let cmdKey = '';
 function updateCmd(sb) {
   const team = TEAM_OF[LOCAL_PLAYER]; let html = '';
   const he = !sb && myHero();
-  if (sb && isTeam(sb) && world.get(sb, 'Bld').done && BLD[world.get(sb, 'Bld').type].train) {
+  const techs = sb && isTeam(sb) && world.get(sb, 'Bld').done ? techList(world.get(sb, 'Bld').type, team) : [];
+  if (sb && isTeam(sb) && world.get(sb, 'Bld').done && (BLD[world.get(sb, 'Bld').type].train || techs.length)) {
     const b = world.get(sb, 'Bld');
-    html = trainList(b.type, LOCAL_PLAYER).map((u, i) => `<button data-train="${u}" ${canPay(team, UNITS[u].cost) && b.queue.length < 5 ? '' : 'disabled'}>${uname(u)} (${keyName(TRAIN_KEYS[i])})<small>${costTxt(UNITS[u].cost)}</small></button>`).join('');
-    if (b.queue.length) html += `<div class="q">${b.queue.map((q, i) => `<button data-cancel="${i}" title="✕">${uname(q.unit)}${i ? '' : ` ${Math.floor(q.t / UNITS[q.unit].time * 100)}%`}</button>`).join('')}</div>`;
+    html = (trainList(b.type, LOCAL_PLAYER) || []).map((u, i) => `<button data-train="${u}" ${canPay(team, UNITS[u].cost) && b.queue.length < 5 ? '' : 'disabled'}>${uname(u)} (${keyName(TRAIN_KEYS[i])})<small>${costTxt(UNITS[u].cost)}</small></button>`).join('');
+    html += techs.map((k, i) => { const why = techWhy(k, team);
+      return `<button data-tech="${k}" ${!why && canPay(team, TECH[k].cost) && b.queue.length < 5 ? '' : 'disabled'} title="${why ? t(why) : ''}">${t('r_' + k)} (${keyName(TECH_KEYS[i])})<small>${why === 'needera' || why === 'leaderonly' ? t(why) : costTxt(TECH[k].cost) + ' ⏱' + Math.round(TECH[k].time * (heroBonus(LOCAL_PLAYER).research || 1)) + 's'}</small></button>`; }).join('');
+    if (b.queue.length) html += `<div class="q">${b.queue.map((q, i) => `<button data-cancel="${i}" title="✕">${uname(q.unit)}${i ? '' : ` ${Math.floor(q.t / qTime(q) * 100)}%`}</button>`).join('')}</div>`;
   } else if (he) {
     const hs = world.heroes[LOCAL_PLAYER], li = lang === 'it' ? 0 : 1;
     html = HEROES[hs.type].ab.map((ab, i) => { const cd = Math.ceil((hs.cd[i] - world.tick) * DT), lock = i === 3 && hs.lvl < 4;
       return `<button data-ab="${i}" ${cd > 0 || lock ? 'disabled' : ''}>${ab.n[li]} (${keyName(ABIL_KEYS[i])})<small>${lock ? '🔒 ' + t('lvl') + ' 4' : cd > 0 ? cd + 's' : ab.cd + 's'}</small></button>`; }).join('');
   } else if (!sb && myVillagers().length) {
-    html = BUILD_LIST.map(k => `<button data-build="${k}" ${canPay(team, BLD[k].cost) ? '' : 'disabled'}>${t('b_' + k)} (${keyName(BLD[k].key)})<small>${costTxt(BLD[k].cost)}</small></button>`).join('');
+    html = BUILD_LIST.map(k => { const lock = (BLD[k].era || 1) > world.era[team];
+      return `<button data-build="${k}" ${canPay(team, BLD[k].cost) && !lock ? '' : 'disabled'}>${t('b_' + k)} (${keyName(BLD[k].key)})<small>${lock ? t('needera') : costTxt(BLD[k].cost)}</small></button>`; }).join('');
   }
   if (html !== cmdKey) { $('cmd').innerHTML = html; cmdKey = html; }
 }
@@ -1792,6 +1891,7 @@ $('cmd').addEventListener('mousedown', e => {
   if (bt.dataset.build) startPlacing(bt.dataset.build);
   else if (bt.dataset.train) train(bt.dataset.train);
   else if (bt.dataset.ab) castKey(+bt.dataset.ab);
+  else if (bt.dataset.tech) research(bt.dataset.tech);
   else if (bt.dataset.cancel && sb) Commands.issue({ type: 'cancel', player: LOCAL_PLAYER, bld: sb, i: +bt.dataset.cancel });
 });
 
@@ -1807,7 +1907,7 @@ const menuMsg = k => $('menumsg').textContent = k ? t(k) : '';
 const netSend = m => net.conns.forEach(c => c.open && c.send(m));
 function netReset() {
   net.peer?.destroy();
-  Object.assign(net, { role: 'solo', peer: null, conns: [], host: null, slots: [], heroes: [], heroKey: '', lastSent: new Map(), cells: [], sapKey: '', resKey: '', hostPaused: false });
+  Object.assign(net, { role: 'solo', peer: null, conns: [], host: null, slots: [], heroes: [], heroKey: '', techKey: '', lastSent: new Map(), cells: [], sapKey: '', resKey: '', hostPaused: false });
   $('chatlog').innerHTML = '';
 }
 function endGame(reason) {
@@ -1940,6 +2040,7 @@ function netBroadcast() {
   const msg = { t: 'snap', tick: world.tick, ch, rm, over: world.over };
   const rs = JSON.stringify(world.res); if (rs !== net.resKey) { net.resKey = rs; msg.res = world.res; }
   const hk = JSON.stringify(world.heroes); if (hk !== net.heroKey) { net.heroKey = hk; msg.heroes = world.heroes; }
+  const tk = JSON.stringify([world.era, world.tech]); if (tk !== net.techKey) { net.techKey = tk; msg.tech = [world.era, world.tech]; }
   if (net.cells.length) { msg.cells = net.cells; net.cells = []; }
   const sp = JSON.stringify([...map.saplings]); if (sp !== net.sapKey) { net.sapKey = sp; msg.sap = [...map.saplings]; }
   netSend(msg);
@@ -1974,6 +2075,7 @@ function applySnap(m) {
   w.over = m.over;
   if (m.res) w.res = m.res;
   if (m.heroes) w.heroes = m.heroes;
+  if (m.tech) [w.era, w.tech] = m.tech;
   if (m.cells) for (const [c, tile, amount] of m.cells) {
     map.tile[c] = tile; map.amount[c] = amount; map.dirty.push(c);
     const x = c % map.M, z = Math.floor(c / map.M); setWalk(x, z, x + 1, z + 1, tile === T.TREE ? 0 : 1);
@@ -2001,7 +2103,7 @@ function frame(now) {
 }
 
 applyLang(); resize(); requestAnimationFrame(frame);
-window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, HEROES, st, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); }, navSelfTest };
+window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, HEROES, TECH, st, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); }, navSelfTest };
 // self-check nav (da console in partita): muro temporaneo → percorso lo aggira; cella chiusa → find fallisce subito
 function navSelfTest() {
   const b = BASES[0], x = b.x + 8, z0 = b.z - 4, z1 = b.z + 5, ok = (c, m) => { if (!c) throw new Error('navSelfTest: ' + m); };
