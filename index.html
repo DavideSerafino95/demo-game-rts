@@ -78,6 +78,7 @@ input,select{font:inherit;background:#120f0a;color:var(--txt);border:1px solid v
     <label><span data-i18n="seed"></span><input id="seed"></label>
     <label><span data-i18n="lang"></span>
       <select id="lang"><option value="it">Italiano</option><option value="en">English</option></select></label>
+    <label><span data-i18n="diff"></span><select id="diff"><option value="easy" data-i18n="easy"></option><option value="normal" data-i18n="normal" selected></option><option value="hard" data-i18n="hard"></option></select></label>
     <button id="btn-solo" data-i18n="solo"></button>
     <button id="btn-host" data-i18n="host"></button>
     <label><input id="joincode" maxlength="6" placeholder="CODICE" style="text-transform:uppercase"><button id="btn-join" data-i18n="join"></button></label>
@@ -199,7 +200,8 @@ const STR = {
     building:'In costruzione', carry:'Trasporta', queue:'Coda', popmax:'Popolazione al massimo!', nores:'Risorse insufficienti', worker:'Contadino', drop:'Deposito',
     name:'Nome', lobby:'Lobby', code:'codice', startgame:'Avvia partita', leave:'Esci', slot_cpu:'CPU', you:'tu', host_tag:'host',
     connecting:'Connessione…', e_conn:'Connessione fallita', e_full:'Partita piena o già iniziata', e_hostgone:'L\'host si è disconnesso',
-    left:'si è disconnesso, lo slot passa alla CPU', joined:'è entrato', hostpause:'Pausa dell\'host', k_chat:'Invio: chat di squadra · Alt+click minimappa: ping', waithost:'In attesa dell\'host…' },
+    left:'si è disconnesso, lo slot passa alla CPU', joined:'è entrato', hostpause:'Pausa dell\'host', k_chat:'Invio: chat di squadra · Alt+click minimappa: ping', waithost:'In attesa dell\'host…',
+    diff:'Difficoltà CPU', easy:'Facile', normal:'Normale', hard:'Difficile', victory:'🏆 Vittoria! Il Centro Città nemico è caduto', defeat:'💀 Sconfitta: il vostro Centro Città è caduto' },
   en: { title:'RTS Demo', solo:'Solo game', host:'Host game', join:'Join', soon:'(coming soon)',
     seed:'Map seed', lang:'Language', food:'Food', wood:'Wood', stone:'Stone', metal:'Metal', gold:'Gold',
     pop:'Pop', controls:'Controls', start:'Start / Resume', toMenu:'Main menu',
@@ -221,7 +223,8 @@ const STR = {
     building:'Under construction', carry:'Carrying', queue:'Queue', popmax:'Population maxed!', nores:'Not enough resources', worker:'Farmer', drop:'Drop site',
     name:'Name', lobby:'Lobby', code:'code', startgame:'Start game', leave:'Leave', slot_cpu:'CPU', you:'you', host_tag:'host',
     connecting:'Connecting…', e_conn:'Connection failed', e_full:'Game full or already started', e_hostgone:'The host disconnected',
-    left:'disconnected, slot goes to CPU', joined:'joined', hostpause:'Paused by host', k_chat:'Enter: team chat · Alt+click minimap: ping', waithost:'Waiting for host…' },
+    left:'disconnected, slot goes to CPU', joined:'joined', hostpause:'Paused by host', k_chat:'Enter: team chat · Alt+click minimap: ping', waithost:'Waiting for host…',
+    diff:'CPU difficulty', easy:'Easy', normal:'Normal', hard:'Hard', victory:'🏆 Victory! The enemy Town Center has fallen', defeat:'💀 Defeat: your Town Center has fallen' },
 };
 let lang = localStorage.getItem('rts_lang') || 'it';
 const t = k => STR[lang][k] ?? k;
@@ -316,7 +319,24 @@ class NavGrid {
     const M = this.map.M, xa = Math.max(0, x0 - 1), za = Math.max(0, z0 - 1), xb = Math.min(M - 1, x1 + 1), zb = Math.min(M - 1, z1 + 1);
     for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) this.addNode(x, z);
     for (let z = za; z <= zb; z++) for (let x = xa; x <= xb; x++) this.link(x, z);
+    this.compDirty = true;
   }
+  // zone connesse (4-vicini = stessa connettività del grafo senza tagli d'angolo); ricalcolate solo se la mappa è cambiata
+  comps() {
+    if (!this.compDirty && this.comp) return this.comp;
+    const M = this.map.M, walk = this.map.walk, comp = this.comp ||= new Int32Array(M * M), st = new Int32Array(M * M);
+    comp.fill(0); let id = 0;
+    for (let i = 0; i < M * M; i++) {
+      if (!walk[i] || comp[i]) continue;
+      let sp = 0; st[sp++] = i; comp[i] = ++id;
+      while (sp) {
+        const c = st[--sp], x = c % M;
+        for (const j of [x > 0 ? c - 1 : -1, x < M - 1 ? c + 1 : -1, c - M, c + M]) if (j >= 0 && j < M * M && walk[j] && !comp[j]) { comp[j] = id; st[sp++] = j; }
+      }
+    }
+    this.compDirty = false; return comp;
+  }
+  compAt(x, z) { const w = this.nearestWalkable(x, z, 6); return w ? this.comps()[w[1] * this.map.M + w[0]] : 0; }
   walkable(x, z) { const M = this.map.M; x = Math.floor(x); z = Math.floor(z); return x >= 0 && z >= 0 && x < M && z < M && !!this.map.walk[this.map.idx(x, z)]; }
   nearestWalkable(x, z, maxR = 12) {
     const cx = Math.floor(x), cz = Math.floor(z);
@@ -341,6 +361,7 @@ class NavGrid {
     const s = this.nearestWalkable(sx, sz, 4), e = this.nearestWalkable(tx, tz);
     if (!s || !e) return null;
     const M = this.map.M, si = s[1] * M + s[0], ei = e[1] * M + e[0];
+    if (this.comps()[si] !== this.comps()[ei]) return null;   // irraggiungibile: niente A* su tutta la mappa
     let pts;
     if (si === ei) pts = [];
     else {
@@ -413,13 +434,30 @@ function* near(x, z, r) {
   const x0 = Math.floor((x - r) / HASH), x1 = Math.floor((x + r) / HASH), z0 = Math.floor((z - r) / HASH), z1 = Math.floor((z + r) / HASH);
   for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) { const a = spatial.get((gx << 8) | gz); if (a) yield* a; }
 }
-function findEnemy(e, r) {
+// unità nemica più vicina; con blds, se non ce ne sono, anche edifici nemici
+function findEnemy(e, r, blds) {
   const p = world.get(e, 'Pos'), tm = teamOf(e); let best = null, bd = r;
   for (const o of near(p.x, p.z, r)) { if (o === e || !alive(o) || teamOf(o) === tm) continue;
     const q = world.get(o, 'Pos'), d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = o; } }
+  if (best || !blds) return best;
+  for (const o of world.query('Bld')) { if (teamOf(o) === tm) continue;
+    const d = distRect(p.x, p.z, bldRect(world.get(o, 'Bld'))); if (d < bd) { bd = d; best = o; } }
   return best;
 }
+const hittable = e => alive(e) || world.has(e, 'Bld');
+const BLD_ARMOR = [2, 6];   // mischia / distanza: le frecce fanno poco agli edifici
+function destroyBuilding(e) {
+  const b = world.get(e, 'Bld'), team = teamOf(e);
+  unoccupy(e); world.remove(e); selection.delete(e);
+  if (b.type === 'cc' && world.over == null) world.over = team;   // squadra sconfitta
+}
 function damage(attacker, target, dmgBase) {
+  const tb = world.get(target, 'Bld');
+  if (tb) {
+    const kind = UNITS[world.get(attacker, 'Unit')?.type]?.kind === 'ranged' ? 1 : 0;
+    tb.hp -= Math.max(1, dmgBase - BLD_ARMOR[kind]); if (tb.hp <= 0) destroyBuilding(target);
+    return;
+  }
   const tu = world.get(target, 'Unit'); if (!tu) return;
   const ad = UNITS[world.get(attacker, 'Unit')?.type] ?? null, td = UNITS[tu.type];
   const kind = ad ? (ad.kind === 'ranged' ? 1 : 0) : 0;
@@ -468,24 +506,26 @@ function unitSystem(w) {
     }
     if (u.cd > 0) u.cd -= DT;
     // acquisizione automatica bersagli
-    if ((o.type === 'idle' || o.type === 'amove') && (w.tick + e) % 5 === 0) {
-      const tg = findEnemy(e, d.sight);
+    const onBld = o.type === 'attack' && w.has(o.target, 'Bld');   // mentre colpisce un edificio, reagisce alle unità
+    if ((o.type === 'idle' || o.type === 'amove' || onBld) && (w.tick + e) % 5 === 0) {
+      const tg = findEnemy(e, d.sight, o.type === 'amove');
       if (tg) {
         if (o.type === 'amove') u.order = { type: 'attack', target: tg, resume: { x: o.x, z: o.z, vmax: o.vmax } };
+        else if (onBld) u.order = { type: 'attack', target: tg, resume: o.resume ?? { x: p.x, z: p.z } };
         else u.order = { type: 'attack', target: tg, auto: true, home: { x: p.x, z: p.z } };
         u.path = null;
       }
     }
     const ord = u.order;
     if (ord.type === 'attack') {
-      if (!alive(ord.target)) {
+      if (!hittable(ord.target)) {
         if (ord.resume) setOrder(e, { type: 'amove', x: ord.resume.x, z: ord.resume.z, vmax: ord.resume.vmax });
         else if (ord.auto && ord.home) setOrder(e, { type: 'move', x: ord.home.x, z: ord.home.z });
         else u.order = { type: 'idle' };
         continue;
       }
-      const q = w.get(ord.target, 'Pos'), td = UNITS[w.get(ord.target, 'Unit').type];
-      const dist = Math.hypot(q.x - p.x, q.z - p.z), gap = dist - d.r - td.r;
+      const q = w.get(ord.target, 'Pos'), tb = w.get(ord.target, 'Bld');
+      const gap = tb ? distRect(p.x, p.z, bldRect(tb)) - d.r : Math.hypot(q.x - p.x, q.z - p.z) - d.r - UNITS[w.get(ord.target, 'Unit').type].r;
       if (ord.auto && ord.home && Math.hypot(p.x - ord.home.x, p.z - ord.home.z) > d.sight * 1.6) { setOrder(e, { type: 'move', x: ord.home.x, z: ord.home.z }); continue; }
       if (gap <= d.range) {
         u.path = null; p.face = Math.atan2(q.x - p.x, q.z - p.z);
@@ -496,9 +536,12 @@ function unitSystem(w) {
           } else damage(e, ord.target, d.atk);
         }
       } else {
-        const stale = !u.path || (!u.path.length && w.tick - u.pathTick > 10) || (w.tick - u.pathTick > 10 && u.pathTarget && Math.hypot(u.pathTarget.x - q.x, u.pathTarget.z - q.z) > 1.5);
-        if (stale && !u.pathPending) requestPath(e, q.x, q.z);
-        followPath(e, u, p, d);
+        if (tb) { const ep = edgePoint(p.x, p.z, bldRect(tb)); approach(e, u, p, d, ep.x, ep.z); }
+        else {
+          const stale = !u.path || (!u.path.length && w.tick - u.pathTick > 10) || (w.tick - u.pathTick > 10 && u.pathTarget && Math.hypot(u.pathTarget.x - q.x, u.pathTarget.z - q.z) > 1.5);
+          if (stale && !u.pathPending) requestPath(e, q.x, q.z);
+          followPath(e, u, p, d);
+        }
       }
     } else if (ord.type === 'move' || ord.type === 'amove') {
       if (!u.pathPending && followPath(e, u, p, d, ord.vmax ?? d.speed) && u.path) { u.order = { type: 'idle' }; u.path = null; }
@@ -524,9 +567,9 @@ function unitSystem(w) {
 function projectileSystem(w) {
   for (const e of [...w.query('Proj')]) {
     const pr = w.get(e, 'Proj'); pr.px = pr.x; pr.pz = pr.z;
-    if (alive(pr.target)) { const q = w.get(pr.target, 'Pos'); pr.tx = q.x; pr.tz = q.z; }
+    if (hittable(pr.target)) { const q = w.get(pr.target, 'Pos'); pr.tx = q.x; pr.tz = q.z; }
     const dx = pr.tx - pr.x, dz = pr.tz - pr.z, dist = Math.hypot(dx, dz), step = pr.speed * DT;
-    if (dist <= step) { if (alive(pr.target)) damage(pr.from, pr.target, pr.dmg); w.remove(e); }
+    if (dist <= step) { if (hittable(pr.target)) damage(pr.from, pr.target, pr.dmg); w.remove(e); }
     else { pr.x += dx / dist * step; pr.z += dz / dist * step; }
   }
 }
@@ -545,13 +588,15 @@ function edgePoint(px, pz, r) {
   const w = nav.nearestWalkable(x, z, 6); return w ? { x: w[0] + .5, z: w[1] + .5 } : { x, z };
 }
 const cellRect = c => { const x = c % map.M, z = Math.floor(c / map.M); return { x0: x, z0: z, x1: x + 1, z1: z + 1 }; };
-const hasWalkNeighbor = c => { const x = c % map.M, z = Math.floor(c / map.M); return NAV_DIRS.some(([dx, dz]) => nav.walkable(x + dx, z + dz)); };
+// vicino percorribile, nella zona comp se data
+const hasWalkNeighbor = (c, comp) => { const x = c % map.M, z = Math.floor(c / map.M);
+  return NAV_DIRS.some(([dx, dz]) => nav.walkable(x + dx, z + dz) && (!comp || nav.comps()[map.idx(x + dx, z + dz)] === comp)); };
 // cella risorsa raggiungibile più vicina a (x,z) entro r
-function findResCell(tile, x, z, r, skip) {
+function findResCell(tile, x, z, r, skip, comp) {
   const M = map.M, cx = Math.floor(x), cz = Math.floor(z); let best = -1, bd = 1e9;
   for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
     const gx = cx + dx, gz = cz + dz; if (gx < 0 || gz < 0 || gx >= M || gz >= M) continue;
-    const i = gz * M + gx; if (map.tile[i] !== tile || !map.amount[i] || skip?.has(i) || !hasWalkNeighbor(i)) continue;
+    const i = gz * M + gx; if (map.tile[i] !== tile || !map.amount[i] || skip?.has(i) || !hasWalkNeighbor(i, comp)) continue;
     const dd = Math.hypot(gx + .5 - x, gz + .5 - z); if (dd < bd) { bd = dd; best = i; }
   }
   return best;
@@ -593,6 +638,11 @@ function createBuilding(type, player, x0, z0, done) {
   occupy(e, type, x0, z0);
   return e;
 }
+function unoccupy(e) {
+  const b = world.get(e, 'Bld'), s = BLD[b.type].size;
+  for (let z = b.z0; z < b.z0 + s; z++) for (let x = b.x0; x < b.x0 + s; x++) map.bld[map.idx(x, z)] = 0;
+  if (!BLD[b.type].walk) setWalk(b.x0, b.z0, b.x0 + s, b.z0 + s, 1);
+}
 function occupy(e, type, x0, z0) {
   const s = BLD[type].size;
   for (let z = z0; z < z0 + s; z++) for (let x = x0; x < x0 + s; x++) map.bld[map.idx(x, z)] = e;
@@ -620,12 +670,8 @@ function farmBusy(fe, e) {
 }
 const toIdle = u => { u.order = { type: 'idle' }; u.path = null; };
 function gatherStep(e, u, p, d, o) {
-  if (u.pathFailed) {   // vicino irraggiungibile (sacca tra alberi): segnalo e provo altro
-    u.pathFailed = false; u.path = null;
-    if (o.farm || ++o.fails > 8) return toIdle(u);
-    (o.bad ||= new Set()).add(map.idx(Math.floor(u.pathTarget.x), Math.floor(u.pathTarget.z)));
-  }
-  o.fails ||= 0;
+  if (u.pathFailed) { u.pathFailed = false; return toIdle(u); }
+  const comp = nav.compAt(p.x, p.z);   // solo celle raggiungibili da qui
   if (u.carry && u.carryRes !== o.res) u.carry = 0;     // cambio risorsa: si perde il carico (come AoE)
   if (u.carry >= CFG.CARRY) { u.order = { type: 'return', back: o }; u.path = null; return; }
   let rect;
@@ -636,7 +682,7 @@ function gatherStep(e, u, p, d, o) {
     if (distRect(p.x, p.z, rect) > .05) { const r = rect; approach(e, u, p, d, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); return; }
   } else {
     if (!map.amount[o.cell] || TILE_RES[map.tile[o.cell]] !== o.res) {
-      const c = findResCell(o.tile, o.cell % map.M + .5, Math.floor(o.cell / map.M) + .5, 8, o.bad);
+      const c = findResCell(o.tile, o.cell % map.M + .5, Math.floor(o.cell / map.M) + .5, 8, o.bad, comp);
       if (c < 0) { if (u.carry) u.order = { type: 'return' }; else toIdle(u); u.path = null; return; }
       o.cell = c; u.path = null; return;
     }
@@ -644,8 +690,8 @@ function gatherStep(e, u, p, d, o) {
     if (distRect(p.x, p.z, rect) > .8) {
       // vicino libero più comodo della cella risorsa
       const cx = o.cell % map.M, cz = Math.floor(o.cell / map.M); let best = null, bd = 1e9;
-      for (const [dx, dz] of NAV_DIRS) if (nav.walkable(cx + dx, cz + dz) && !o.bad?.has(map.idx(cx + dx, cz + dz))) { const dd = Math.hypot(cx + dx + .5 - p.x, cz + dz + .5 - p.z); if (dd < bd) { bd = dd; best = [cx + dx + .5, cz + dz + .5]; } }
-      if (!best) { (o.bad ||= new Set()).add(o.cell); map.amount[o.cell] && (o.cell = findResCell(o.tile, cx + .5, cz + .5, 8, o.bad)); if (o.cell < 0) toIdle(u); return; }
+      for (const [dx, dz] of NAV_DIRS) if (nav.walkable(cx + dx, cz + dz) && nav.comps()[map.idx(cx + dx, cz + dz)] === comp) { const dd = Math.hypot(cx + dx + .5 - p.x, cz + dz + .5 - p.z); if (dd < bd) { bd = dd; best = [cx + dx + .5, cz + dz + .5]; } }
+      if (!best) { (o.bad ||= new Set()).add(o.cell); map.amount[o.cell] && (o.cell = findResCell(o.tile, cx + .5, cz + .5, 8, o.bad, comp)); if (o.cell < 0) toIdle(u); return; }
       approach(e, u, p, d, best[0], best[1]); return;
     }
   }
@@ -663,7 +709,7 @@ function returnStep(e, u, p, d, o) {
   if (!dep) { if (o.back && !u.carry) { u.order = o.back; u.path = null; } else toIdle(u); return; }
   const r = bldRect(world.get(dep, 'Bld'));
   if (distRect(p.x, p.z, r) <= .9) {
-    teamRes(team)[u.carryRes] += u.carry; u.carry = 0; u.gatherT = 0;
+    teamRes(team)[u.carryRes] += u.carry * (team === 1 ? DIFF[world.diff].mult : 1); u.carry = 0; u.gatherT = 0;
     if (o.back) { u.order = o.back; u.path = null; } else toIdle(u);
   } else { const ep = edgePoint(p.x, p.z, r); approach(e, u, p, d, ep.x, ep.z); }
 }
@@ -672,7 +718,7 @@ function afterBuild(e, u, b) {
   const bd = BLD[b.type];
   if (bd.farm && !farmBusy(u.order.target, e)) { u.order = { type: 'gather', farm: u.order.target, res: 'food' }; u.path = null; return; }
   const res = bd.drop?.find(r => r !== 'food'), tile = res && +Object.keys(TILE_RES).find(k => TILE_RES[k] === res);
-  const c = tile ? findResCell(tile, b.x0 + bd.size / 2, b.z0 + bd.size / 2, 10) : -1;
+  const p = world.get(e, 'Pos'), c = tile ? findResCell(tile, b.x0 + bd.size / 2, b.z0 + bd.size / 2, 10, null, nav.compAt(p.x, p.z)) : -1;
   if (c >= 0) { u.order = { type: 'gather', cell: c, tile, res }; u.path = null; } else toIdle(u);
 }
 function buildStep(e, u, p, d, o) {
@@ -697,7 +743,7 @@ function spawnFrom(be, type, player) {
   const b = world.get(be, 'Bld'), r = bldRect(b), target = b.rally || { x: r.x1 + 1, z: r.z1 + 1 };
   const ep = edgePoint(target.x, target.z, r), u = spawnUnit(type, player, ep.x, ep.z);
   if (!b.rally) return;
-  const rc = resAt(b.rally.x, b.rally.z), c = rc >= 0 ? findResCell(map.tile[rc], b.rally.x, b.rally.z, 4) : -1, rb = bldAt(b.rally.x, b.rally.z);
+  const rc = resAt(b.rally.x, b.rally.z), c = rc >= 0 ? findResCell(map.tile[rc], b.rally.x, b.rally.z, 4, null, nav.compAt(ep.x, ep.z)) : -1, rb = bldAt(b.rally.x, b.rally.z);
   if (type === 'popolano' && c >= 0) setOrder(u, { type: 'gather', cell: c, tile: map.tile[c], res: TILE_RES[map.tile[c]] });
   else if (type === 'popolano' && rb && BLD[world.get(rb, 'Bld')?.type]?.farm) setOrder(u, { type: 'gather', farm: rb, res: 'food' });
   else setOrder(u, { type: 'move', x: b.rally.x, z: b.rally.z });
@@ -739,6 +785,129 @@ function buildingSystem(w) {
     map.saplings.delete(i); map.tile[i] = T.TREE; map.amount[i] = 100; cellChanged(i); setWalk(x, z, x + 1, z + 1, 0);
   }
 }
+/* ================= IA CPU (solo host) ================= */
+// Un comandante per squadra guida tutti gli slot CPU con gli stessi comandi dei giocatori.
+// shortcut: niente micro (focus fuoco, ritirata feriti) né eroi; arriva con M6 / bilanciamento M8
+const DIFF = {
+  easy:   { mult: .75, think: 40, vil: 10, wave0: 480, waveN: 8 },
+  normal: { mult: 1,   think: 20, vil: 14, wave0: 360, waveN: 6 },
+  hard:   { mult: 1.25, think: 10, vil: 18, wave0: 240, waveN: 6 },
+};
+const AI_PLAN = [['segheria', 1], ['caserma', 1], ['miniera', 1], ['arcieria', 1], ['guardaboschi', 1], ['scuderia', 1], ['caserma', 2], ['arcieria', 2]];
+const AI_SHARE = { food: .32, wood: .4, stone: .1, metal: .12, gold: .06 };
+const RES_TILE = { wood: T.TREE, stone: T.STONE, metal: T.METAL, gold: T.GOLD };
+function aiSystem(w) {
+  const D = DIFF[w.diff];
+  for (const team of [0, 1]) {
+    if ((w.tick + team * 7) % D.think || w.over != null) continue;
+    const pls = [0, 1, 2].map(k => team * 3 + k).filter(pl => !w.humans[pl]);
+    if (pls.length) aiThink(team, pls, D);
+  }
+}
+// un comando per proprietario (gli handler accettano solo unità del giocatore)
+function issueAs(units, cmd) {
+  const by = new Map(); for (const e of units) { const pl = world.get(e, 'Owner').player; if (!by.has(pl)) by.set(pl, []); by.get(pl).push(e); }
+  for (const [pl, us] of by) Commands.issue({ ...cmd, player: pl, units: us });
+}
+const ringFree = (x0, z0, s) => {
+  for (let z = z0 - 1; z <= z0 + s; z++) for (let x = x0 - 1; x <= x0 + s; x++) if (map.bld[map.idx(x, z)]) return false;
+  return true;
+};
+// spirale attorno al punto, lasciando un corridoio attorno agli altri edifici; scarta posti chiusi tra gli alberi
+// spirale attorno al punto; lascia un corridoio attorno agli altri edifici e scarta posti non raggiungibili dalla base
+function aiSpot(type, cx, cz, comp) {
+  const s = BLD[type].size, M = map.M, cs = nav.comps();
+  const touches = (x0, z0) => { for (let z = z0 - 1; z <= z0 + s; z++) for (let x = x0 - 1; x <= x0 + s; x++) if (cs[z * M + x] === comp && (x < x0 || z < z0 || x >= x0 + s || z >= z0 + s)) return true; return false; };
+  for (let r = 3; r < 26; r++) for (let k = 0; k < 8 * r; k++) {
+    const a = k / (8 * r) * Math.PI * 2, x0 = Math.round(cx + Math.cos(a) * r - s / 2), z0 = Math.round(cz + Math.sin(a) * r - s / 2);
+    if (placeOk(type, x0, z0) && ringFree(x0, z0, s) && touches(x0, z0)) return [x0, z0];
+  }
+  return null;
+}
+function aiBuild(team, pl, type, builders) {
+  const b = BASES[team], res = BLD[type].drop?.find(r => r !== 'food');
+  const comp = world.ai[team].comp, c = res ? findResCell(RES_TILE[res], b.x, b.z, 30, null, comp) : -1;
+  const spot = c >= 0 ? aiSpot(type, c % map.M, Math.floor(c / map.M), comp) : aiSpot(type, b.x, b.z, comp);
+  const v = builders.find(e => world.get(e, 'Owner').player === pl && world.get(e, 'Unit').order.type !== 'build');
+  if (spot && v && canPay(team, BLD[type].cost)) Commands.issue({ type: 'build', player: pl, units: [v], bld: type, x0: spot[0], z0: spot[1] });
+  return !!(spot && v);
+}
+function aiTarget(team, x, z) {   // edificio nemico più vicino, altrimenti unità
+  let best = null, bd = 1e9;
+  for (const e of world.query('Bld')) if (teamOf(e) !== team) { const d = distRect(x, z, bldRect(world.get(e, 'Bld'))); if (d < bd) { bd = d; best = world.get(e, 'Pos'); } }
+  if (!best) for (const e of world.query('Unit')) if (teamOf(e) !== team) { const p = world.get(e, 'Pos'), d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = p; } }
+  return best;
+}
+function aiThink(team, pls, D) {
+  const w = world, ai = w.ai[team], base = BASES[team], owner = e => w.get(e, 'Owner').player;
+  const mine = [...w.query('Unit')].filter(e => pls.includes(owner(e)));
+  const vil = mine.filter(e => w.get(e, 'Unit').type === 'popolano'), army = mine.filter(e => w.get(e, 'Unit').type !== 'popolano');
+  const blds = [...w.query('Bld')].filter(e => teamOf(e) === team), B = e => w.get(e, 'Bld');
+  const cc = blds.find(e => B(e).type === 'cc'); if (!cc) return;
+  ai.comp = nav.compAt(base.x + 3.5, base.z + 3.5);
+  const count = ty => blds.filter(e => B(e).type === ty).length;
+  let busy = blds.some(e => !B(e).done && B(e).type !== 'casa' && B(e).type !== 'fattoria');
+  // case: per ogni CPU vicina al limite di popolazione
+  for (const pl of pls)
+    if (popCap(pl) < CFG.POP_MAX && popCap(pl) - popOf(pl) <= 2 && !blds.some(e => !B(e).done && B(e).type === 'casa' && owner(e) === pl)) aiBuild(team, pl, 'casa', vil);
+  // cantieri senza nessuno che lavora (costruttore ucciso o riassegnato): rimanda un popolano del proprietario
+  for (const e of blds) {
+    if (B(e).done || !pls.includes(owner(e)) || vil.some(v => w.get(v, 'Unit').order.target === e)) continue;
+    const v = vil.find(v => owner(v) === owner(e) && w.get(v, 'Unit').order.type !== 'build');
+    if (v) Commands.issue({ type: 'construct', player: owner(v), units: [v], target: e });
+  }
+  // piano edifici, uno alla volta (conta anche quelli dei compagni umani)
+  const next = AI_PLAN.find(([ty, n]) => count(ty) < n);
+  if (!busy && next && canPay(team, BLD[next[0]].cost)) busy = aiBuild(team, pls[ai.turn++ % pls.length], next[0], vil);
+  // popolani inattivi → la risorsa più scoperta rispetto alle quote
+  const gath = { food: 0, wood: 0, stone: 0, metal: 0, gold: 0 };
+  for (const v of vil) { const o = w.get(v, 'Unit').order, r = o.res ?? o.back?.res; if (r) gath[r]++; }
+  const claimed = new Set();
+  for (const v of vil) {
+    if (w.get(v, 'Unit').order.type !== 'idle') continue;
+    const pl = owner(v);
+    for (const r of [...RES].sort((a, b) => gath[a] / AI_SHARE[a] - gath[b] / AI_SHARE[b])) {
+      if (r === 'food') {
+        const farm = blds.find(e => B(e).done && BLD[B(e).type].farm && !farmBusy(e, 0) && !claimed.has(e));
+        if (farm) { claimed.add(farm); Commands.issue({ type: 'gather', player: pl, units: [v], farm }); gath.food++; break; }
+        if (!blds.some(e => !B(e).done && B(e).type === 'fattoria') && canPay(team, BLD.fattoria.cost) && aiBuild(team, pl, 'fattoria', [v])) { gath.food++; break; }
+        continue;
+      }
+      const dp = nearestDrop(team, r, base.x, base.z), from = dp ? w.get(dp, 'Pos') : base;
+      const c = findResCell(RES_TILE[r], from.x, from.z, 30, null, ai.comp); if (c < 0) continue;
+      Commands.issue({ type: 'gather', player: pl, units: [v], cell: c }); gath[r]++; break;
+    }
+  }
+  // addestramento: popolani fino alla quota, poi truppe se avanza (riserva per gli edifici)
+  const rich = cost => RES.every(r => !cost[r] || teamRes(team)[r] >= cost[r] + 60);
+  for (const pl of pls)
+    if (vil.filter(e => owner(e) === pl).length < D.vil && !B(cc).queue.some(q => q.player === pl) && canPay(team, UNITS.popolano.cost))
+      Commands.issue({ type: 'train', player: pl, bld: cc, unit: 'popolano' });
+  for (const e of blds) {
+    const b = B(e), list = BLD[b.type].train;
+    if (!b.done || b.type === 'cc' || !list || b.queue.length >= 2) continue;
+    const unit = list[Math.floor(w.rng() * list.length)];
+    if (rich(UNITS[unit].cost)) Commands.issue({ type: 'train', player: pls[Math.floor(w.rng() * pls.length)], bld: e, unit });
+  }
+  // difesa: nemici vicino ai nostri edifici → l'esercito di casa attacca
+  ai.wave = ai.wave.filter(alive);
+  const home = army.filter(e => !ai.wave.includes(e));
+  let threat = null;
+  for (const e of w.query('Unit')) {
+    if (teamOf(e) === team) continue;
+    const p = w.get(e, 'Pos'); if (blds.some(b => distRect(p.x, p.z, bldRect(B(b))) < 12)) { threat = p; break; }
+  }
+  if (threat) { const free = home.filter(e => w.get(e, 'Unit').order.type !== 'attack'); if (free.length) issueAs(free, { type: 'move', x: threat.x, z: threat.z, amove: true }); }
+  // ondate coordinate: tutte le CPU partono insieme, soglia che cresce a ogni ondata
+  else if (w.tick * DT >= D.wave0 && home.length >= D.waveN + ai.waves * 2) {
+    const cx = home.reduce((a, e) => a + w.get(e, 'Pos').x, 0) / home.length, cz = home.reduce((a, e) => a + w.get(e, 'Pos').z, 0) / home.length;
+    const tg = aiTarget(team, cx, cz);
+    if (tg) { ai.wave.push(...home); ai.waves++; issueAs(home, { type: 'move', x: tg.x, z: tg.z, amove: true }); }
+  }
+  // ondata arrivata (unità ferme): prossimo bersaglio
+  const idleW = ai.wave.filter(e => w.get(e, 'Unit').order.type === 'idle');
+  if (idleW.length) { const p = w.get(idleW[0], 'Pos'), tg = aiTarget(team, p.x, p.z); if (tg) issueAs(idleW, { type: 'move', x: tg.x, z: tg.z, amove: true }); }
+}
 const pingSystem = w => { for (const e of [...w.query('Ping')]) { const p = w.get(e, 'Ping'); if (--p.ttl <= 0) w.remove(e); } };
 
 /* ================= COMANDI ================= */
@@ -767,7 +936,7 @@ const Commands = {
       const vmax = us.length > 1 ? Math.min(...us.map(e => UNITS[w.get(e, 'Unit').type].speed)) : undefined;
       for (const [e, x, z] of formation(us, c.x, c.z)) setOrder(e, { type: c.amove ? 'amove' : 'move', x, z, vmax });
     },
-    attack(w, c) { if (!alive(c.target)) return; for (const e of owned(c)) setOrder(e, { type: 'attack', target: c.target }); },
+    attack(w, c) { if (!hittable(c.target)) return; for (const e of owned(c)) setOrder(e, { type: 'attack', target: c.target }); },
     stop(w, c) { for (const e of owned(c)) setOrder(e, { type: 'idle' }); },
     kill(w, c) { for (const e of owned(c)) killUnit(e); },
     // villagers: solo popolani del giocatore
@@ -1098,11 +1267,12 @@ function updatePlacing() {
 const bldAt = (x, z) => { const M = map.M, cx = Math.floor(x), cz = Math.floor(z); return cx >= 0 && cz >= 0 && cx < M && cz < M ? map.bld[cz * M + cx] : 0; };
 function train(unit) { const b = selBld(); if (b && isTeam(b)) Commands.issue({ type: 'train', player: LOCAL_PLAYER, bld: b, unit }); }
 function issueMoveOrAttack(x, z, target, amove = false) {
+  if (!target) { const be = bldAt(x, z); if (be && !isTeam(be)) target = be; }
   const sb = selBld();
   if (sb && isTeam(sb) && BLD[world.get(sb, 'Bld').type].train) { Commands.issue({ type: 'rally', player: LOCAL_PLAYER, bld: sb, x, z }); showMarker(x, z); return; }
   const units = mySelected(); if (!units.length) return;
   const vill = units.filter(e => world.get(e, 'Unit').type === 'popolano');
-  if (!amove && vill.length === units.length && !(target && alive(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER])) {
+  if (!amove && vill.length === units.length && !(target && hittable(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER])) {
     const be = bldAt(x, z), b = be && world.get(be, 'Bld');
     if (b && isTeam(be)) {
       if (!b.done) { Commands.issue({ type: 'construct', player: LOCAL_PLAYER, units, target: be }); showMarker(x, z); return; }
@@ -1110,9 +1280,9 @@ function issueMoveOrAttack(x, z, target, amove = false) {
       if (BLD[b.type].drop) { Commands.issue({ type: 'dropoff', player: LOCAL_PLAYER, units }); showMarker(x, z); return; }
     }
     const rc = resAt(x, z);
-    if (rc >= 0) { const c = findResCell(map.tile[rc], x, z, 4); if (c >= 0) { Commands.issue({ type: 'gather', player: LOCAL_PLAYER, units, cell: c }); showMarker(c % map.M + .5, Math.floor(c / map.M) + .5); return; } }
+    if (rc >= 0) { const p0 = world.get(units[0], 'Pos'), c = findResCell(map.tile[rc], x, z, 4, null, nav.compAt(p0.x, p0.z)); if (c >= 0) { Commands.issue({ type: 'gather', player: LOCAL_PLAYER, units, cell: c }); showMarker(c % map.M + .5, Math.floor(c / map.M) + .5); return; } }
   }
-  if (target && alive(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER]) {
+  if (target && hittable(target) && teamOf(target) !== TEAM_OF[LOCAL_PLAYER]) {
     Commands.issue({ type: 'attack', player: LOCAL_PLAYER, units, target });
     const p = world.get(target, 'Pos'); showMarker(p.x, p.z, true);
   } else { Commands.issue({ type: 'move', player: LOCAL_PLAYER, units, x, z, amove }); showMarker(x, z, amove); }
@@ -1251,21 +1421,22 @@ function spawnStart(humans) {
   const place = (type, pl, x, z) => { const w = nav.nearestWalkable(x, z, 8); if (w) spawnUnit(type, pl, w[0] + .5, w[1] + .5); };
   // CC condiviso per squadra (proprietario = primo slot della squadra)
   BASES.forEach((bb, team) => createBuilding('cc', team * 3, bb.x - 2, bb.z - 2, true));
-  // popolani per ogni slot umano (gli slot CPU arrivano con M5)
-  const b = BASES[0], off = [[4, 4], [-6, 4], [4, -6]];
-  humans.forEach((h, pl) => { if (h) for (let i = 0; i < 4; i++) place('popolano', pl, b.x + off[pl][0] + (i % 2), b.z + off[pl][1] + (i >> 1)); });
-  // squadra nemica di prova (giocatore 3) a ~42 celle dalla base, verso il centro
-  const ex = b.x + 30, ez = b.z + 30;
-  [['fante', 5], ['arciere', 3], ['lanciere', 2], ['cavaliere', 2]].forEach(([type, n], k) => {
-    for (let i = 0; i < n; i++) place(type, 3, ex + (i - n / 2) * .9 + k * .5, ez + k * 1.1 - i * .3);
-  });
+  // 4 popolani per ogni slot (umano o CPU); la base 1 è speculare
+  const off = [[4, 4], [-6, 4], [4, -6]];
+  for (let pl = 0; pl < 6; pl++) {
+    const b = BASES[TEAM_OF[pl]], sg = TEAM_OF[pl] ? -1 : 1, [ox, oz] = off[pl % 3];
+    for (let i = 0; i < 4; i++) place('popolano', pl, b.x + sg * (ox + (i % 2)), b.z + sg * (oz + (i >> 1)));
+  }
 }
 
 function startGame(seed, humans) {
   map = generateMap(seed);
   const t0 = performance.now(); nav = new NavGrid(map); navMs = Math.round(performance.now() - t0);
   world = new World();
-  world.systems = net.role === 'client' ? [] : [pathSystem, unitSystem, buildingSystem, projectileSystem, pingSystem];
+  world.systems = net.role === 'client' ? [] : [aiSystem, pathSystem, unitSystem, buildingSystem, projectileSystem, pingSystem];
+  world.humans = [0, 1, 2, 3, 4, 5].map(i => !!humans[i]);   // slot senza umano = CPU
+  world.diff = $('diff').value; world.over = null;
+  world.ai = [0, 1].map(() => ({ wave: [], waves: 0, turn: 0 }));
   world.res = [0, 1].map(() => ({ ...CFG.START_RES }));
   world.rng = mulberry32(hashSeed(seed + ':sim'));
   selection.clear(); pathQueue.length = 0; for (const k in groups) delete groups[k];
@@ -1290,6 +1461,7 @@ function updateHud(dt) {
   const s = Math.floor(world.tick * CFG.TICK_MS / 1000);
   $('r-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` + (net.role === 'client' && net.hostPaused ? ' ⏸ ' + t('hostpause') : '');
   const tr = teamRes(TEAM_OF[LOCAL_PLAYER]); for (const r of RES) $('r-' + r).textContent = Math.floor(tr[r]);
+  if (world.over != null && !placing && !amoveMode) showHint(world.over === TEAM_OF[LOCAL_PLAYER] ? 'defeat' : 'victory');
   $('r-pop').textContent = `${popOf(LOCAL_PLAYER)}/${popCap(LOCAL_PLAYER)}`;
   const p = screenToGround(...pxToNdc(mouse.x, mouse.y));
   const hc = p && p.x >= 0 && p.z >= 0 && p.x < CFG.MAP && p.z < CFG.MAP ? [Math.floor(p.x), Math.floor(p.z)] : null;
@@ -1394,6 +1566,7 @@ function hostOnClose(conn) {
   if (conn.slot === undefined || !net.conns.includes(conn)) return;
   net.conns = net.conns.filter(c => c !== conn);
   const name = net.slots[conn.slot]; net.slots[conn.slot] = null;   // lo slot passa alla CPU, non si riprende
+  if (state === 'game') world.humans[conn.slot] = false;
   sysChat(name + ' ' + t('left'));
   if (state === 'lobby') lobbyBroadcast();
 }
@@ -1464,7 +1637,7 @@ function netBroadcast() {
     if (net.lastSent.get(e) !== s) { net.lastSent.set(e, s); ch.push([e, ...a]); }
   }
   const rm = []; for (const e of net.lastSent.keys()) if (!seen.has(e)) { rm.push(e); net.lastSent.delete(e); }
-  const msg = { t: 'snap', tick: world.tick, ch, rm };
+  const msg = { t: 'snap', tick: world.tick, ch, rm, over: world.over };
   const rs = JSON.stringify(world.res); if (rs !== net.resKey) { net.resKey = rs; msg.res = world.res; }
   if (net.cells.length) { msg.cells = net.cells; net.cells = []; }
   const sp = JSON.stringify([...map.saplings]); if (sp !== net.sapKey) { net.sapKey = sp; msg.sap = [...map.saplings]; }
@@ -1493,7 +1666,8 @@ function applySnap(m) {
       if (!w.has(e, 'Ping')) { w.add(e, 'Pos', { x, z, px: x, pz: z }); w.add(e, 'Owner', { player }); w.add(e, 'Ping', { ttl, max }); } else w.get(e, 'Ping').ttl = ttl;
     }
   }
-  for (const e of m.rm) { w.remove(e); selection.delete(e); }
+  for (const e of m.rm) { if (w.has(e, 'Bld')) unoccupy(e); w.remove(e); selection.delete(e); }
+  w.over = m.over;
   if (m.res) w.res = m.res;
   if (m.cells) for (const [c, tile, amount] of m.cells) {
     map.tile[c] = tile; map.amount[c] = amount; map.dirty.push(c);
@@ -1522,7 +1696,20 @@ function frame(now) {
 }
 
 applyLang(); resize(); requestAnimationFrame(frame);
-window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); } };
+window.__rts = { get world() { return world; }, get map() { return map; }, get nav() { return nav; }, Commands, camState, selection, spawnUnit, UNITS, BLD, placeOk, popCap, popOf, step: n => { for (let i = 0; i < n; i++) simStep(); }, navSelfTest };
+// self-check nav (da console in partita): muro temporaneo → percorso lo aggira; cella chiusa → find fallisce subito
+function navSelfTest() {
+  const b = BASES[0], x = b.x + 8, z0 = b.z - 4, z1 = b.z + 5, ok = (c, m) => { if (!c) throw new Error('navSelfTest: ' + m); };
+  const saved = []; for (let z = z0; z < z1; z++) saved.push(map.walk[map.idx(x, z)]);
+  setWalk(x, z0, x + 1, z1, 0);
+  const path = nav.find(x - 2.5, b.z + .5, x + 3.5, b.z + .5);
+  ok(path && path.every(q => Math.floor(q.x) !== x || Math.floor(q.z) < z0 || Math.floor(q.z) >= z1), 'percorso attraversa il muro');
+  setWalk(x - 1, b.z - 1, x + 2, b.z + 2, 0); setWalk(x, b.z, x + 1, b.z + 1, 1);    // cella libera chiusa da ogni lato
+  nav.comps(); const t0 = performance.now(); ok(!nav.find(x - 2.5, b.z - 4.5, x + .5, b.z + .5) && performance.now() - t0 < 5, 'cella chiusa non scartata subito');
+  for (let z = z0 - 1; z < z1 + 1; z++) for (let xx = x - 1; xx <= x + 1; xx++) map.walk[map.idx(xx, z)] = (map.tile[map.idx(xx, z)] === T.GRASS || map.tile[map.idx(xx, z)] === T.FORD) && !map.bld[map.idx(xx, z)] ? 1 : 0;
+  nav.rebuildArea(x - 1, z0 - 1, x + 1, z1);
+  return 'ok';
+}
 </script>
 </body>
 </html>
